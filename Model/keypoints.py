@@ -27,7 +27,8 @@ class RTMPose():
 
             for kp_index, (kp, score) in enumerate(zip(keypoints, scores)):
                 print(f"Keypoint {kp_index}: (x = {kp[0]:.1f}, y = {kp[1]:.1f}), score = {score:.2f}")
-        
+            print("\n")
+            
         visualized_img = result['visualization']
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
