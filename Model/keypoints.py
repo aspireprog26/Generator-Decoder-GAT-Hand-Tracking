@@ -3,6 +3,7 @@ import warnings
 from mmengine.logging import MMLogger
 from mmpose.apis import MMPoseInferencer
 import time
+
 # hides python level warnings
 warnings.filterwarnings("ignore")  
 
@@ -37,7 +38,7 @@ class RTMPose():
     def get_coords(self):
         results = self.get_keypoints()
         img_coords = []
-
+        
         for result in results:      # get each generator result
             for predictions in result['predictions']:       # get each prediction in the batch per image
                 kp_coords = {}
@@ -45,18 +46,18 @@ class RTMPose():
                     for kp_index, coord in enumerate(coords['keypoints']):      # obtain the index and coordinate for each keypoint
                         kp_coords[kp_index] = coord
                 img_coords.append(kp_coords)
-
+    
         return img_coords
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 pose = RTMPose('/home/mrtcloud-1/Documents/Hand-Tracking-2/VideoTracking/', dev = device)
+#keypoints = pose.get_coords()
 
-keypoints = pose.get_coords()
+
 total_time = 0
 for i in range(100):
     t0 = time.time()
     keypoints = pose.get_coords()
     t1 = time.time()
     total_time += (t1 - t0)
-
 print(f"Average time per frame: {total_time / 100:.4f} seconds")
