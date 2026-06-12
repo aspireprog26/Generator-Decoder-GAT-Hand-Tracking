@@ -1,0 +1,382 @@
+import time
+import warnings
+from pathlib import Path
+
+import cv2
+import numpy as np
+import pycuda.autoinit  # Initializes CUDA automatically when imported.
+import pycuda.driver as cuda
+import tensorrt as trt
+
+# Hide non-critical warnings to keep the console cleaner.
+warnings.filterwarnings('ignore')
+
+
+# Hand skeleton connections.
+# Each tuple means: draw a line between keypoint A and keypoint B.
+# The keypoint indices must match the model's output ordering.
+HAND_SKELETON = [
+    (0, 1), (1, 2), (2, 3), (3, 4),
+    (0, 5), (5, 6), (6, 7), (7, 8),
+    (0, 9), (9, 10), (10, 11), (11, 12),
+    (0, 13), (13, 14), (14, 15), (15, 16),
+    (0, 17), (17, 18), (18, 19), (19, 20),
+]
+
+
+class TensorRTEngine:
+    def __init__(self, engine_path: str):
+        # Store the engine path as a string in case a Path object is passed in.
+        self.engine_path = str(engine_path)
+
+        # Create a TensorRT logger that only prints errors.
+        self.logger = trt.Logger(trt.Logger.ERROR)
+
+        # Load any TensorRT plugins that may be required by the engine.
+        trt.init_libnvinfer_plugins(self.logger, "")
+
+        # Deserialize the engine from disk.
+        with open(self.engine_path, "rb") as f:
+            runtime = trt.Runtime(self.logger)
+            self.engine = runtime.deserialize_cuda_engine(f.read())
+
+        # Fail early if the engine could not be loaded.
+        if self.engine is None:
+            raise RuntimeError(f"Failed to load TensorRT engine: {self.engine_path}")
+
+        # Create an execution context, which is required to run inference.
+        self.context = self.engine.create_execution_context()
+        if self.context is None:
+            raise RuntimeError("Failed to create TensorRT execution context")
+
+        # CUDA stream used for asynchronous copies and inference.
+        self.stream = cuda.Stream()
+
+        # Identify all input bindings.
+        self.input_indices = [
+            i for i in range(self.engine.num_bindings) if self.engine.binding_is_input(i)
+        ]
+        # Identify all output bindings.
+        self.output_indices = [
+            i for i in range(self.engine.num_bindings) if not self.engine.binding_is_input(i)
+        ]
+
+        # This wrapper expects a single input tensor.
+        if len(self.input_indices) != 1:
+            raise RuntimeError(f"Expected exactly 1 input, found {len(self.input_indices)}")
+
+        self.input_idx = self.input_indices[0]
+
+        # Print a binding summary to help debug engine shapes/dtypes.
+        print("TensorRT engine bindings:")
+        for i in range(self.engine.num_bindings):
+            name = self.engine.get_binding_name(i)
+            shape = tuple(self.engine.get_binding_shape(i))
+            dtype = self.engine.get_binding_dtype(i)
+            kind = "INPUT" if self.engine.binding_is_input(i) else "OUTPUT"
+            print(f"  {i}: {name} | {kind} | shape={shape} | dtype={dtype}")
+
+    def infer(self, input_array: np.ndarray):
+        # TensorRT models normally expect NCHW input: batch, channels, height, width.
+        if input_array.ndim != 4:
+            raise ValueError(f"Expected NCHW input, got shape {input_array.shape}")
+
+        # If the engine uses dynamic input shapes, tell TensorRT the actual shape.
+        if -1 in tuple(self.engine.get_binding_shape(self.input_idx)):
+            self.context.set_binding_shape(self.input_idx, input_array.shape)
+
+        # TensorRT wants a bindings list containing device pointers for every binding.
+        bindings = [0] * self.engine.num_bindings
+
+        # Convert the input to the engine's expected dtype and ensure contiguous memory.
+        input_dtype = trt.nptype(self.engine.get_binding_dtype(self.input_idx))
+        input_array = np.ascontiguousarray(input_array.astype(input_dtype, copy=False))
+
+        # Allocate GPU memory for the input and copy host -> device.
+        d_input = cuda.mem_alloc(input_array.nbytes)
+        cuda.memcpy_htod_async(d_input, input_array, self.stream)
+        bindings[self.input_idx] = int(d_input)
+
+        # These lists keep track of output buffers on host and device.
+        host_outputs = []
+        device_outputs = []
+        output_shapes = []
+
+        # Allocate memory for every output tensor.
+        for idx in self.output_indices:
+            # Query the output shape from the execution context.
+            shape = tuple(self.context.get_binding_shape(idx))
+            if any(dim < 0 for dim in shape):
+                raise RuntimeError(f"Output shape still dynamic for binding {idx}: {shape}")
+
+            # Determine output dtype and total number of elements.
+            dtype = trt.nptype(self.engine.get_binding_dtype(idx))
+            size = int(np.prod(shape))
+
+            # Page-locked host memory improves transfer speed.
+            host_mem = cuda.pagelocked_empty(size, dtype)
+            device_mem = cuda.mem_alloc(host_mem.nbytes)
+
+            bindings[idx] = int(device_mem)
+            host_outputs.append(host_mem)
+            device_outputs.append(device_mem)
+            output_shapes.append(shape)
+
+        # Run the engine asynchronously on the CUDA stream.
+        self.context.execute_async_v2(bindings=bindings, stream_handle=self.stream.handle)
+
+        # Copy each output back from device -> host.
+        for host_mem, device_mem in zip(host_outputs, device_outputs):
+            cuda.memcpy_dtoh_async(host_mem, device_mem, self.stream)
+
+        # Wait until all queued CUDA work has finished.
+        self.stream.synchronize()
+
+        # Reshape flat outputs back into their original tensor shapes.
+        outputs = [host.reshape(shape) for host, shape in zip(host_outputs, output_shapes)]
+        return outputs
+
+
+class RTMPoseTRT:
+    def __init__(self, engine_path: str, frame_dir: str, input_size=(256, 256)):
+        # Wrap the TensorRT engine runner.
+        self.engine = TensorRTEngine(engine_path)
+
+        # Root directory containing the expected FrameIn / FrameOut subfolders.
+        self.frame_dir = Path(frame_dir)
+
+        # Store the model input size as width/height.
+        self.input_w, self.input_h = input_size
+
+    def _read_image(self, path_or_array):
+        # Allow either a file path or an already-loaded image array.
+        if isinstance(path_or_array, (str, Path)):
+            img = cv2.imread(str(path_or_array), cv2.IMREAD_COLOR)
+            if img is None:
+                raise FileNotFoundError(f"Could not read image: {path_or_array}")
+            return img
+
+        # Convert any array-like input to a NumPy array.
+        img = np.asarray(path_or_array)
+        if img.ndim != 3:
+            raise ValueError(f"Expected image with 3 dims, got {img.shape}")
+        return img
+
+    def preprocess(self, img_bgr: np.ndarray):
+        # Normalization values commonly used by RTM-style vision backbones.
+        mean = np.array([123.675, 116.28, 103.53], dtype=np.float32)
+        std = np.array([58.395, 57.12, 57.375], dtype=np.float32)
+
+        # OpenCV loads images as BGR; the model expects RGB.
+        img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+        # Resize to the model's fixed input size.
+        img = cv2.resize(img, (self.input_w, self.input_h), interpolation=cv2.INTER_LINEAR)
+
+        # Convert to float for normalization.
+        img = img.astype(np.float32)
+        img = (img - mean) / std
+
+        # Convert from HWC to CHW because TensorRT/model expects channel-first layout.
+        img = np.transpose(img, (2, 0, 1))  # HWC -> CHW
+        return img
+
+    def _decode_outputs(self, outputs):
+        # RTMPose exports can have different output formats depending on how the model was converted.
+        # Supported patterns:
+        # 1) one output: (B, K, 2) or (B, K, 3) -> direct coordinates
+        # 2) one output: (B, K, H, W) -> heatmaps
+        # 3) two outputs: (B, K, L) and (B, K, L) -> SimCC-style x/y distributions
+
+        if len(outputs) == 1:
+            out = outputs[0]
+
+            # Direct coordinate output: last dimension contains x/y, and optionally confidence.
+            if out.ndim == 3 and out.shape[-1] in (2, 3):
+                coords = out[..., :2].astype(np.float32)
+                if out.shape[-1] == 3:
+                    scores = out[..., 2].astype(np.float32)
+                else:
+                    scores = np.ones(coords.shape[:2], dtype=np.float32)
+                return coords, scores
+
+            # Heatmap output: find the maximum response for each keypoint.
+            if out.ndim == 4:
+                b, k, h, w = out.shape
+                coords = np.zeros((b, k, 2), dtype=np.float32)
+                scores = np.zeros((b, k), dtype=np.float32)
+
+                for bi in range(b):
+                    for ki in range(k):
+                        hm = out[bi, ki]
+                        idx = int(np.argmax(hm))
+                        y, x = divmod(idx, w)
+
+                        # Convert heatmap coordinates into input-image coordinates.
+                        coords[bi, ki, 0] = x * (self.input_w / max(w - 1, 1))
+                        coords[bi, ki, 1] = y * (self.input_h / max(h - 1, 1))
+                        scores[bi, ki] = float(hm[y, x])
+
+                return coords, scores
+
+            raise RuntimeError(f"Unsupported single-output shape: {out.shape}")
+
+        # SimCC-style output often appears as two distributions: one for x, one for y.
+        if len(outputs) >= 2:
+            x_out, y_out = outputs[0], outputs[1]
+
+            if x_out.ndim == 3 and y_out.ndim == 3 and x_out.shape[:2] == y_out.shape[:2]:
+                b, k, lx = x_out.shape
+                _, _, ly = y_out.shape
+                coords = np.zeros((b, k, 2), dtype=np.float32)
+                scores = np.zeros((b, k), dtype=np.float32)
+
+                for bi in range(b):
+                    for ki in range(k):
+                        x_idx = int(np.argmax(x_out[bi, ki]))
+                        y_idx = int(np.argmax(y_out[bi, ki]))
+
+                        # Convert distribution indices into input-image coordinates.
+                        coords[bi, ki, 0] = x_idx * (self.input_w / max(lx - 1, 1))
+                        coords[bi, ki, 1] = y_idx * (self.input_h / max(ly - 1, 1))
+
+                        # Confidence is approximated by combining the best x and y probabilities.
+                        scores[bi, ki] = float(x_out[bi, ki, x_idx] * y_out[bi, ki, y_idx])
+
+                return coords, scores
+
+        # If we get here, the engine export format does not match the decoder logic.
+        raise RuntimeError(
+            "Could not decode engine outputs. Print the binding shapes and adjust the decoder."
+        )
+
+    def _scale_to_original(self, coords, orig_w, orig_h):
+        # Make a float copy so we can rescale coordinates without modifying the original array.
+        scaled = coords.copy().astype(np.float32)
+        scaled[..., 0] = scaled[..., 0] * (orig_w / float(self.input_w))
+        scaled[..., 1] = scaled[..., 1] * (orig_h / float(self.input_h))
+        return scaled
+
+    def draw_hand(self, img_bgr, coords, scores=None, kpt_thr=0.3):
+        # Draw on a copy so the original image stays untouched.
+        vis = img_bgr.copy()
+
+        # Draw the bones first so keypoint circles appear on top.
+        for a, b in HAND_SKELETON:
+            if a in coords and b in coords:
+                # Skip low-confidence bones if scores are available.
+                if scores is not None:
+                    if scores[a] < kpt_thr or scores[b] < kpt_thr:
+                        continue
+
+                p1 = coords[a]
+                p2 = coords[b]
+                pt1 = (int(round(p1[0])), int(round(p1[1])))
+                pt2 = (int(round(p2[0])), int(round(p2[1])))
+                cv2.line(vis, pt1, pt2, (255, 0, 0), 2)
+
+        # Draw each keypoint as a filled circle with a border.
+        for idx, pt in coords.items():
+            if scores is not None and scores[idx] < kpt_thr:
+                continue
+
+            center = (int(round(pt[0])), int(round(pt[1])))
+            cv2.circle(vis, center, 4, (0, 255, 0), -1)
+            cv2.circle(vis, center, 4, (0, 0, 0), 1)
+
+        return vis
+
+    def get_keypoints(self, vis_out_dir=None, kpt_thr=0.3):
+        # This script expects these exact two input files.
+        image_paths = [
+            self.frame_dir / "FrameIn" / "left.jpeg",
+            self.frame_dir / "FrameIn" / "right.jpeg",
+        ]
+
+        results = []
+
+        # Visualization output directory.
+        vis_dir = Path(vis_out_dir) if vis_out_dir is not None else (self.frame_dir / "FrameOut")
+        if vis_out_dir is not None:
+            vis_dir.mkdir(parents=True, exist_ok=True)
+
+        for image_path in image_paths:
+            # Load the image.
+            img = self._read_image(image_path)
+
+            # Preprocess and add batch dimension: (C, H, W) -> (1, C, H, W).
+            batch = np.expand_dims(self.preprocess(img), axis=0)
+
+            # Run inference through TensorRT.
+            outputs = self.engine.infer(batch)
+
+            # Decode the model outputs into keypoint coordinates and scores.
+            coords, scores = self._decode_outputs(outputs)
+
+            # Some exports include a batch dimension of 1, others do not.
+            if coords.ndim == 3:
+                coords = coords[0]
+                scores = scores[0]
+            elif coords.ndim != 2:
+                raise RuntimeError(f"Unexpected coords shape: {coords.shape}")
+
+            # Scale coordinates back to the original image size.
+            h, w = img.shape[:2]
+            scaled_coords = self._scale_to_original(coords, w, h)
+
+            # Convert coordinates to a dictionary keyed by keypoint index.
+            kp_coords = {}
+            for ki in range(scaled_coords.shape[0]):
+                kp_coords[ki] = scaled_coords[ki].tolist()
+
+            # Save a structured result for this image.
+            results.append(
+                {
+                    "image_path": str(image_path),
+                    "keypoints": kp_coords,
+                    "scores": scores.tolist() if hasattr(scores, "tolist") else list(scores),
+                }
+            )
+
+            # Optionally create and save a visualization image.
+            if vis_out_dir is not None:
+                vis = self.draw_hand(img, kp_coords, scores=scores, kpt_thr=kpt_thr)
+                out_name = image_path.stem + "_vis.jpg"
+                cv2.imwrite(str(vis_dir / out_name), vis)
+
+        return results
+
+    def get_coords(self, vis_out_dir=None, kpt_thr=0.3):
+        # Convenience method that returns only the coordinate dictionaries.
+        results = self.get_keypoints(vis_out_dir=vis_out_dir, kpt_thr=kpt_thr)
+        img_coords = []
+
+        for result in results:
+            img_coords.append(result["keypoints"])
+
+        return img_coords
+
+
+if __name__ == "__main__":
+    # Hardcoded paths for this specific machine/project layout.
+    engine_path = "/home/mrtcloud-1/Documents/RTMPoseONNX/rtmpose_hand.trt"
+    frame_dir = "/home/mrtcloud-1/Documents/Hand-Tracking-2/VideoTracking/"
+    vis_dir = Path(frame_dir) / "FrameOut"
+
+    # Create the model wrapper.
+    pose = RTMPoseTRT(engine_path=engine_path, frame_dir=frame_dir, input_size=(256, 256))
+
+    # Warm up the GPU / TensorRT execution path before timing.
+    for _ in range(50):
+        _ = pose.get_coords()
+
+    # Save one pass of annotated images.
+    _ = pose.get_coords(vis_out_dir=vis_dir)
+    print(f"Saved visualizations to: {vis_dir}")
+
+    # Measure inference time over multiple runs.
+    for _ in range(200):
+        t0 = time.time()
+        keypoints = pose.get_coords()
+        t1 = time.time()
+        print(t1 - t0)

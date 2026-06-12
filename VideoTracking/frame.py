@@ -1,7 +1,7 @@
 import cv2
 from pynput import keyboard
 
-class Vid2Frame():
+class Vid2Frame:
     def __init__(self, cam_index):
         print("Initializing Camera.")
     

@@ -53,11 +53,12 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 pose = RTMPose('/home/mrtcloud-1/Documents/Hand-Tracking-2/VideoTracking/', dev = device)
 #keypoints = pose.get_coords()
 
+#do warmup
+for _ in range(50):
+    keypoints = pose.get_coords()
 
-total_time = 0
-for i in range(100):
+for i in range(200):
     t0 = time.time()
     keypoints = pose.get_coords()
     t1 = time.time()
-    total_time += (t1 - t0)
-print(f"Average time per frame: {total_time / 100:.4f} seconds")
+    print(t1 - t0)
