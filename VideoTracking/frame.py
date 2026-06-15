@@ -32,16 +32,26 @@ class Video:
             if not self.frame_queue.empty():
                 frame = self.frame_queue.get()
                 cv2.imshow("Hand Tracking 2D", frame)
-
                 if cv2.waitKey(1) & 0xFF == ord('q'):
-                    self.running = False
-                    self.cam.release()
-                    cv2.destroyAllWindows()
+                    self.quit()
                     break
 
     def start(self):
         take_frame_thread = Thread(target = self.take_frame, daemon = True)
+        take_frame_thread.start()
         self.get_frame()
 
+    def quit(self):
+        self.running = False
+        self.cam.release()
+        cv2.destroyAllWindows()
+
 left = Video(CAM, "left")
+
+def quit_streams():
+    left.quit()
+    listener.stop()
+    
+listener = keyboard.Listener(on_press = quit_streams)
+listener.start()
 left.start()
