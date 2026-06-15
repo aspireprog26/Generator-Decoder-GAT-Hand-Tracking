@@ -57,8 +57,13 @@ pose = RTMPose('/home/mrtcloud-1/Documents/Hand-Tracking-2/VideoTracking/', dev 
 for _ in range(50):
     keypoints = pose.get_coords()
 
+"""
 for i in range(200):
     t0 = time.time()
     keypoints = pose.get_coords()
     t1 = time.time()
     print(t1 - t0)
+"""
+
+keypoints = pose.get_coords()
+print(keypoints)

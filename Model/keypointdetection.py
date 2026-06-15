@@ -6,6 +6,8 @@ import tensorrt as trt
 from pathlib import Path
 import pycuda.driver as cuda
 
+import time
+
 # Hide the non-critical warnings to keep console clean
 warnings.filterwarnings("ignore")
 
@@ -25,7 +27,7 @@ class TRTEngine:
         self.engine_path = engine
 
         self.logger = trt.Logger(trt.Logger.ERROR)      # Create TensorRT logger that only prints errors
-        trt.init_libnvinfer_pluggins(self.logger, "")   # Load any TensorRT plugins that are required by the engine
+        trt.init_libnvinfer_plugins(self.logger, "")   # Load any TensorRT plugins that are required by the engine
 
         # Deserialize the engine from the disk (rebuilds object from the TensorRT engine)
         with open(self.engine_path, "rb") as f:
@@ -47,7 +49,7 @@ class TRTEngine:
         self.input_indices = [i for i in range(self.engine.num_bindings) if self.engine.binding_is_input(i)]
 
         # Identify all output bindings
-        self.output_indices = [i for i in range(self.engine.num_bindings) if self.engine.binding_is_input(i)]
+        self.output_indices = [i for i in range(self.engine.num_bindings) if not self.engine.binding_is_input(i)]
   
         # Raise error if input length > 1 (this wrapper expects a single input tensor)
         if len(self.input_indices) != 1:
@@ -88,7 +90,7 @@ class TRTEngine:
                 raise RuntimeError(f"Output shape still dynamic for binding {idx}: {shape}.")
             
             # Determine output dtype and total number of elements
-            dtype = trt.ntype(self.engine.get_binding_dtype(idx))
+            dtype = trt.nptype(self.engine.get_binding_dtype(idx))
             size = int(np.prod(shape))
 
             # Create CPU memory buffer for TensorRT to recieve output data copied back from the GPU
@@ -115,12 +117,12 @@ class TRTEngine:
         return outputs
 
 class RTMPose:
-    def __init__(self, engine, frame_dir, vis_dir, conf, input_size = (256, 256)):
+    def __init__(self, engine, frame_dir):
         self.engine = TRTEngine(engine)
         self.frame_dir = Path(frame_dir)        # create the directory containing the FrameIn / FrameOut folders
-        self.input_w, self.input_h = input_size
-        self.vis_dir = vis_dir
-        self.conf = conf
+        self.input_w, self.input_h = (256, 256)
+        self.vis_dir = self.frame_dir / "FrameOut"
+        self.conf = 0.3
 
     def read_image(self, image_array):
         if isinstance(image_array, (str, Path)):
@@ -149,7 +151,7 @@ class RTMPose:
         img = (img - mean) / std
 
         # Convert from HWC to CHW because TensorRT expect (Channels, Height, Width)
-        np.transpose(img, (2, 0, 1))
+        img = np.transpose(img, (2, 0, 1))
         return img
     
     def decode_outputs(self, outputs):
@@ -163,6 +165,58 @@ class RTMPose:
 
         if len(outputs) == 1:
             out = outputs[0]
+
+            # Direct coordinate output: last dimension contains x, y and confidence
+            if out.ndim == 3 and out.shape[-1] in (2, 3):
+                coords = out[..., :2].astype(np.float32)
+                if out.shape[-1] == 3:
+                    scores = out[..., 2].astype(np.float32)
+                else:
+                    scores = np.ones(coords.shape[:2], dtype = np.float32)
+                return coords, scores
+            
+            # Heatmap output: Find the maximum probability pixel for each keypoint
+            if out.ndim == 4:
+                b, k, h, w = out.shape
+                coords = np.zeros((b, k, 2), dtype = np.float32)
+                scores = np.zeros((b, k), dtype = np.float32)
+
+                for bi in range(b):
+                    for ki in range(k):
+                        heatmap = out[bi, ki]
+                        pos = int(np.argmax(heatmap))
+                        y, x = divmod(pos, w)
+
+                        # Convert heatmap coordinates to input-image coordinates
+                        coords[bi, ki, 0] = x * (self.input_w / max(w - 1, 1))
+                        coords[bi, ki, 1] = y * (self.input_h / max(h - 1, 1))
+                        scores[bi, ki] = float(heatmap[y, x])
+                
+                return coords, scores
+            
+        # SimCC-style output distributions for x and y
+        if len(outputs) >= 2:
+            x_out, y_out = outputs[0], outputs[1]
+
+            if x_out.ndim == 3 and y_out.ndim == 3 and y_out.shape[:2]:
+                b, k, lx = x_out.shape
+                _, _, ly = y_out.shape
+                coords = np.zeros((b, k, 2), dtype = np.float32)
+                scores = np.zeros((b, k), dtype = np.float32)
+
+                for bi in range(b):
+                    for ki in range(k):
+                        x_pos = int(np.argmax(x_out[bi, ki]))
+                        y_pos = int(np.argmax(y_out[bi, ki]))
+                        
+                        # Convert distribution indixes into input-image coordinates
+                        coords[bi, ki, 0] = x_pos * (self.input_w / max(lx - 1, 1))
+                        coords[bi, ki, 1] = y_pos * (self.input_h / max(ly - 1, 1))
+
+                        # Approximate confidence by combining best x and y probabilities
+                        scores[bi, ki] = float(x_out[bi, ki, x_pos] * y_out[bi, ki, y_pos])
+                
+                return coords, scores
 
     def orig_scale(self, coords, orig_w, orig_h):
         # Make a float copy so we can rescale coordinates without modifying the original array
@@ -184,12 +238,12 @@ class RTMPose:
                 if scores[a] < self.conf or scores[b] < self.conf:
                     continue
             
-            p1 = coords[a]
-            p2 = coords[b]
+                p1 = coords[a]
+                p2 = coords[b]
 
-            pt1 = (int(round(p1[0])), int(round(p1[1])))
-            pt2 = (int(round(p2[0])), int(round(p2[1])))
-            cv2.line(vis, pt1, pt2, (41, 212, 166), 2)      # Color the lines of the keypoint skeleton
+                pt1 = (int(round(p1[0])), int(round(p1[1])))
+                pt2 = (int(round(p2[0])), int(round(p2[1])))
+                cv2.line(vis, pt1, pt2, (41, 212, 166), 2)      # Color the lines of the keypoint skeleton
 
         # Draw each keypoint as filled circle with border
         for idx, pt in coords.items():
@@ -197,22 +251,58 @@ class RTMPose:
                 continue
 
             center = (int(round(pt[0])), int(round(pt[1])))
-            cv2.circle(vis, center, 4, (0, 255, 0), -1)
-            cv2.circle(vis, center, 4, (0, 0, 0), 1)    
+            cv2.circle(vis, center, 5, (0, 255, 0), -1)     # Inner circle
+            cv2.circle(vis, center, 5, (255, 255, 255), 1)        # Border circle  
         
         return vis
             
     def get_keypoints(self):
-        None
-    
-    def get_coords(self):
-        results = self.get_keypoints()
-        img_coords = []
+        results = []
+        image_paths = [
+            self.frame_dir / "FrameIn" / "left.jpeg",
+            self.frame_dir / "FrameIn" / "right.jpeg"
+        ]
 
-        for coords in results:
-            img_coords.append(coords['keypoints'])
+
+        for image_path in image_paths:
+            image = self.read_image(image_path)
+
+            # Preprocess and add batch dimension
+            batch = np.expand_dims(self.preprocess(image), axis = 0)
+            outputs = self.engine.infer(batch)
+
+            coords, scores = self.decode_outputs(outputs)
+            
+            # Remove exports with additional batch dimension
+            if coords.ndim == 3:
+                coords = coords[0]
+                scores = scores[0]
+            
+            # Scale coordinates back to original image size
+            h, w = image.shape[:2]      # Only takes height and width, ignores RGB channel
+            scaled_coords = self.orig_scale(coords, w, h)
+
+            kp_coords = {}
+            for i in range(scaled_coords.shape[0]):
+                kp_coords[i] = scaled_coords[i].tolist()
+
+            results.append(kp_coords)
+            vis = self.draw_hand(image, kp_coords, scores)
+            out =  image_path.stem + ".jpeg"
+            cv2.imwrite(str(self.vis_dir / out), vis)
         
-        return img_coords
+        return results
     
+if __name__ == "__main__":
+    # Hardcoded paths for this specific machine/project layout.
+    ENGINE = "/home/mrtcloud-1/Documents/RTMPoseONNX/rtmpose_hand.trt"
+    FRAME_DIR = "/home/mrtcloud-1/Documents/Hand-Tracking-2/VideoTracking/"
 
-# Complete get_keypoints and decode_outputs functions.
+    # Create the model wrapper.
+    pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
+
+    # Warm up the GPU / TensorRT execution path before timing.
+    for _ in range(100):
+        _ = pose.get_keypoints()
+    
+    keypoints = pose.get_keypoints()
