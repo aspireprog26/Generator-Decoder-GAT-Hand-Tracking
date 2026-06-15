@@ -117,20 +117,12 @@ class TRTEngine:
         return outputs
 
 class RTMPose:
-    def __init__(self, engine, frame_dir):
+    def __init__(self, engine):
         self.engine = TRTEngine(engine)
-        self.frame_dir = Path(frame_dir)        # create the directory containing the FrameIn / FrameOut folders
         self.input_w, self.input_h = (256, 256)
-        self.vis_dir = self.frame_dir / "FrameOut"
         self.conf = 0.3
 
     def read_image(self, image_array):
-        if isinstance(image_array, (str, Path)):
-            img = cv2.imread(str(image_array), cv2.IMREAD_COLOR)        # loads the images in BGR
-            if img is None:
-                raise FileNotFoundError(f"Could not read image: {image_array}.")
-            return img
-
         # Convert array input to NumPy array
         img = np.asarray(image_array)
         if img.ndim != 3:
@@ -251,18 +243,14 @@ class RTMPose:
                 continue
 
             center = (int(round(pt[0])), int(round(pt[1])))
-            cv2.circle(vis, center, 5, (0, 255, 0), -1)     # Inner circle
-            cv2.circle(vis, center, 5, (255, 255, 255), 1)        # Border circle  
+            cv2.circle(vis, center, 5, (0, 255, 0), -1)         # Inner circle
+            cv2.circle(vis, center, 5, (255, 255, 255), 1)      # Border circle  
         
         return vis
             
-    def get_keypoints(self):
+    def get_keypoints(self, left_frame, right_frame):
         results = []
-        image_paths = [
-            self.frame_dir / "FrameIn" / "left.jpeg",
-            self.frame_dir / "FrameIn" / "right.jpeg"
-        ]
-
+        image_paths = [left_frame, right_frame]
 
         for image_path in image_paths:
             image = self.read_image(image_path)
@@ -288,18 +276,15 @@ class RTMPose:
 
             results.append(kp_coords)
             vis = self.draw_hand(image, kp_coords, scores)
-            out =  image_path.stem + ".jpeg"
-            cv2.imwrite(str(self.vis_dir / out), vis)
         
-        return results
+        return results, vis
     
 if __name__ == "__main__":
     # Hardcoded paths for this specific machine/project layout.
     ENGINE = "/home/mrtcloud-1/Documents/RTMPoseONNX/rtmpose_hand.trt"
-    FRAME_DIR = "/home/mrtcloud-1/Documents/Hand-Tracking-2/VideoTracking/"
 
     # Create the model wrapper.
-    pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
+    pose = RTMPose(engine = ENGINE)
 
     # Warm up the GPU / TensorRT execution path before timing.
     for _ in range(100):
