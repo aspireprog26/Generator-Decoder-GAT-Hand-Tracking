@@ -117,12 +117,20 @@ class TRTEngine:
         return outputs
 
 class RTMPose:
-    def __init__(self, engine):
+    def __init__(self, engine, frame_dir):
         self.engine = TRTEngine(engine)
+        self.frame_dir = Path(frame_dir)        # create the directory containing the FrameIn / FrameOut folders
         self.input_w, self.input_h = (256, 256)
-        self.conf = 0.1
+        self.vis_dir = self.frame_dir / "FrameOut"
+        self.conf = 0.3
 
     def read_image(self, image_array):
+        if isinstance(image_array, (str, Path)):
+            img = cv2.imread(str(image_array), cv2.IMREAD_COLOR)        # loads the images in BGR
+            if img is None:
+                raise FileNotFoundError(f"Could not read image: {image_array}.")
+            return img
+
         # Convert array input to NumPy array
         img = np.asarray(image_array)
         if img.ndim != 3:
@@ -246,12 +254,16 @@ class RTMPose:
             cv2.circle(vis, center, 5, (0, 0, 255), -1)         # Inner circle
             cv2.circle(vis, center, 5, (0, 0, 0), 1)      # Border circle  
         
+        
         return vis
             
-    def get_keypoints(self, left_frame, right_frame):
+    def get_keypoints(self):
         results = []
-        visuals = []
-        image_paths = [left_frame, right_frame]
+        image_paths = [
+            self.frame_dir / "FrameIn" / "left.jpeg",
+            self.frame_dir / "FrameIn" / "right.jpeg"
+        ]
+
 
         for image_path in image_paths:
             image = self.read_image(image_path)
@@ -277,6 +289,28 @@ class RTMPose:
 
             results.append(kp_coords)
             vis = self.draw_hand(image, kp_coords, scores)
-            visuals.append(vis)
+            out =  image_path.stem + ".jpeg"
+            cv2.imwrite(str(self.vis_dir / out), vis)
         
-        return results, visuals
+        return results
+    
+if __name__ == "__main__":
+    # Hardcoded paths for this specific machine/project layout.
+    ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
+    FRAME_DIR = r"C:\Users\Test\Documents\Hand-Tracking\VideoTracking/"
+
+    # Create the model wrapper.
+    pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
+
+    # Warm up the GPU / TensorRT execution path before timing.
+    for _ in range(100):
+        _ = pose.get_keypoints()
+
+    times = []
+    for _ in range(1):
+        t0 = time.time()
+        _ = pose.get_keypoints()
+        t1 = time.time()
+        times.append(t1-t0)
+    
+print(np.mean(times))

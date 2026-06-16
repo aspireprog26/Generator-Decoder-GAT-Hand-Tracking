@@ -1,37 +1,34 @@
 import cv2
-from queue import Queue
+import sys
 from pynput import keyboard
 from threading import Thread
 
-CAM = 0
+sys.path.insert(1, r"C:\Users\Test\Documents\Hand-Tracking\Model")
+import keypointdetection as kp  # type: ignore
 
-class Video:
+CAM = 1
+ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
+class Video():
     def __init__(self, cam_index, camera):
         print(f"Initializing {camera} camera.")
 
         self.running = True
         self.cam = cv2.VideoCapture(cam_index)
-        self.frame_queue = Queue(maxsize = 1)       # Only hold one frame at a time
+        self.last_frame = None
+
+        self.pose = kp.RTMPose(ENGINE)
 
     def take_frame(self):
         while self.running:
             ret, frame = self.cam.read()
-            if not ret:
-                continue
-
-            if self.frame_queue.full():
-                try:
-                    self.frame_queue.get_nowait()
-                except:
-                    pass
-            
-            self.frame_queue.put(frame)
+            if ret:
+                self.last_frame = frame
 
     def get_frame(self):
         while self.running:
-            if not self.frame_queue.empty():
-                frame = self.frame_queue.get()
-                cv2.imshow("Hand Tracking 2D", frame)
+            if self.last_frame is not None:
+                kp_frame = self.pose.get_keypoints(self.last_frame, self.last_frame)[1][0]
+                cv2.imshow("Hand Tracking 2D", kp_frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     self.quit()
                     break
