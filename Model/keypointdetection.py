@@ -120,7 +120,7 @@ class RTMPose:
     def __init__(self, engine):
         self.engine = TRTEngine(engine)
         self.input_w, self.input_h = (256, 256)
-        self.conf = 0.1
+        self.conf = 0.07
 
     def read_image(self, image_array):
         # Convert array input to NumPy array

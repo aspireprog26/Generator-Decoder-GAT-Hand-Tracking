@@ -6,7 +6,7 @@ from threading import Thread
 sys.path.insert(1, r"C:\Users\Test\Documents\Hand-Tracking\Model")
 import keypointdetection as kp  # type: ignore
 
-CAM = 1
+CAM = 0
 ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
 class Video():
     def __init__(self, cam_index, camera):
