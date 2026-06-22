@@ -120,7 +120,7 @@ class RTMPose:
     def __init__(self, engine):
         self.engine = TRTEngine(engine)
         self.input_w, self.input_h = (256, 256)
-        self.conf = 0.07
+        self.conf = 0.105
 
     def read_image(self, image_array):
         # Convert array input to NumPy array
@@ -250,7 +250,8 @@ class RTMPose:
             
     def get_keypoints(self, left_frame, right_frame):
         results = []
-        visuals = []
+        score = []
+
         image_paths = [left_frame, right_frame]
 
         for image_path in image_paths:
@@ -276,7 +277,6 @@ class RTMPose:
                 kp_coords[i] = scaled_coords[i].tolist()
 
             results.append(kp_coords)
-            vis = self.draw_hand(image, kp_coords, scores)
-            visuals.append(vis)
-        
-        return results, visuals
+            score.append(scores)
+
+        return results, score 

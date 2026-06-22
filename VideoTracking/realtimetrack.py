@@ -1,23 +1,40 @@
 import cv2
 import sys
+import numpy as np
 from pynput import keyboard
 from threading import Thread
 
 sys.path.insert(1, r"C:\Users\Test\Documents\Hand-Tracking\Model")
 import keypointdetection as kp  # type: ignore
 
-CAM = 0
+CAM = 1
 ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
 class Video():
-    def __init__(self, cam_index, camera):
-        print(f"Initializing {camera} camera.")
+    def __init__(self, cam_index):
+        print(f"Initializing stereo camera.")
 
         self.running = True
         self.cam = cv2.VideoCapture(cam_index)
-        self.last_frame = None
 
+        self.last_frame = None
+        self.avg_left_coord = None
+        self.avg_right_coord = None
+
+        self.alpha = 0.6
         self.pose = kp.RTMPose(ENGINE)
 
+    def ema(self, arr, alpha, axis):
+        arr = np.asarray(arr)
+        x = np.moveaxis(arr, axis, 0)
+
+        y = np.empty_like(x, dtype = float)
+        y[0] = x[0]
+
+        for i in range(1, x.shape[0]):
+            y[i] = alpha * x[i] + (1 - alpha) * y[i - 1]
+
+        return np.moveaxis(y, 0, axis)
+    
     def take_frame(self):
         while self.running:
             ret, frame = self.cam.read()
@@ -27,8 +44,32 @@ class Video():
     def get_frame(self):
         while self.running:
             if self.last_frame is not None:
-                kp_frame = self.pose.get_keypoints(self.last_frame, self.last_frame)[1][0]
-                cv2.imshow("Hand Tracking 2D", kp_frame)
+                h, w = self.last_frame.shape[:2]
+                half = w // 2
+
+                left  = self.last_frame[:, :half]
+                right = self.last_frame[:, half:]
+                kp_frame = self.pose.get_keypoints(left, right)
+
+                avg_score_right = self.ema(kp_frame[1][1], self.alpha, 0)                
+                avg_score_left = self.ema(kp_frame[1][0], self.alpha, 0)
+
+                self.avg_left_coord = kp_frame[0][0]
+                self.avg_right_coord = kp_frame[0][1]
+ 
+                for i in range(len(self.avg_left_coord)):
+                    left_kps = self.avg_left_coord[i]
+                    right_kps = self.avg_right_coord[i]
+                    for kp_l, kp_r in left_kps, right_kps:
+                        kp_l = self.alpha * kp_l + (1 - self.alpha) * kp_l
+                        kp_r = self.alpha * kp_r + (1 - self.alpha) * kp_r
+
+                left_frame = self.pose.draw_hand(left, self.avg_left_coord, avg_score_left)
+                right_frame = self.pose.draw_hand(right, self.avg_right_coord, avg_score_right)
+
+                cv2.imshow("Left Camera", left_frame)
+                cv2.imshow("Right Camera", right_frame)
+
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     self.quit()
                     break
@@ -43,7 +84,7 @@ class Video():
         self.cam.release()
         cv2.destroyAllWindows()
 
-left = Video(CAM, "left")
+left = Video(CAM)
 
 def quit_streams():
     left.quit()
