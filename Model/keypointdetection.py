@@ -3,10 +3,7 @@ import warnings
 import numpy as np
 import pycuda.autoinit      # Initializes cuda when imported
 import tensorrt as trt
-from pathlib import Path
 import pycuda.driver as cuda
-
-import time
 
 # Hide the non-critical warnings to keep console clean
 warnings.filterwarnings("ignore")
@@ -19,7 +16,7 @@ HAND_SKELETON = [
     (0, 5), (5, 6), (6, 7), (7, 8),
     (0, 9), (9, 10), (10, 11), (11, 12),
     (0, 13), (13, 14), (14, 15), (15, 16),
-    (0, 17), (17, 18), (18, 19), (19, 20),
+    (0, 17), (17, 18), (18, 19), (19, 20)
 ]
 
 class TRTEngine:
@@ -120,7 +117,7 @@ class RTMPose:
     def __init__(self, engine):
         self.engine = TRTEngine(engine)
         self.input_w, self.input_h = (256, 256)
-        self.conf = 0.105
+        self.conf = 0.12
 
     def read_image(self, image_array):
         # Convert array input to NumPy array
@@ -252,10 +249,10 @@ class RTMPose:
         results = []
         score = []
 
-        image_paths = [left_frame, right_frame]
+        image_list = [left_frame, right_frame]
 
-        for image_path in image_paths:
-            image = self.read_image(image_path)
+        for images in image_list:
+            image = self.read_image(images)
 
             # Preprocess and add batch dimension
             batch = np.expand_dims(self.preprocess(image), axis = 0)

@@ -5,8 +5,7 @@ import pycuda.autoinit      # Initializes cuda when imported
 import tensorrt as trt
 from pathlib import Path
 import pycuda.driver as cuda
-
-import time
+import matplotlib.pyplot as plt
 
 # Hide the non-critical warnings to keep console clean
 warnings.filterwarnings("ignore")
@@ -19,7 +18,7 @@ HAND_SKELETON = [
     (0, 5), (5, 6), (6, 7), (7, 8),
     (0, 9), (9, 10), (10, 11), (11, 12),
     (0, 13), (13, 14), (14, 15), (15, 16),
-    (0, 17), (17, 18), (18, 19), (19, 20),
+    (0, 17), (17, 18), (18, 19), (19, 20)
 ]
 
 class TRTEngine:
@@ -122,7 +121,7 @@ class RTMPose:
         self.frame_dir = Path(frame_dir)        # create the directory containing the FrameIn / FrameOut folders
         self.input_w, self.input_h = (256, 256)
         self.vis_dir = self.frame_dir / "FrameOut"
-        self.conf = 0.3
+        self.conf = 0.12
 
     def read_image(self, image_array):
         if isinstance(image_array, (str, Path)):
@@ -254,17 +253,19 @@ class RTMPose:
             cv2.circle(vis, center, 5, (0, 0, 255), -1)         # Inner circle
             cv2.circle(vis, center, 5, (0, 0, 0), 1)      # Border circle  
         
-        
         return vis
             
     def get_keypoints(self):
         results = []
-        image_paths = [
-            self.frame_dir / "FrameIn" / "left.jpeg",
-            self.frame_dir / "FrameIn" / "right.jpeg"
-        ]
 
+        img = cv2.imread(str(self.frame_dir / "FrameIn" / "img.jpg"), cv2.IMREAD_COLOR)
+        h, w = img.shape[:2]
+        half = w // 2
 
+        left  = img[:, :half]
+        right = img[:, half:]  
+        image_paths = [left, right]
+        n = 0
         for image_path in image_paths:
             image = self.read_image(image_path)
 
@@ -289,8 +290,9 @@ class RTMPose:
 
             results.append(kp_coords)
             vis = self.draw_hand(image, kp_coords, scores)
-            out =  image_path.stem + ".jpeg"
+            out =  str(n) + ".jpeg"
             cv2.imwrite(str(self.vis_dir / out), vis)
+            n += 1
         
         return results
     
@@ -303,14 +305,64 @@ if __name__ == "__main__":
     pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
 
     # Warm up the GPU / TensorRT execution path before timing.
-    for _ in range(100):
-        _ = pose.get_keypoints()
+    kps = pose.get_keypoints()
+    left_kps = kps[0]
+    right_kps = kps[1]
 
-    times = []
-    for _ in range(1):
-        t0 = time.time()
-        _ = pose.get_keypoints()
-        t1 = time.time()
-        times.append(t1-t0)
+    pts_left = []
+    pts_right = []
+
+    for i in range(len(left_kps)):
+        pts_left.append(left_kps[i])
+        pts_right.append(right_kps[i])
+
+    # Load calibrated camera features
+    fs = cv2.FileStorage(r"C:\Users\Test\Documents\Hand-Tracking\Stereo\stereo2.yml", cv2.FILE_STORAGE_READ)
+    P1 = fs.getNode("P1").mat()
+    P2 = fs.getNode("P2").mat()
+    K1 = fs.getNode("K1").mat()
+    K2 = fs.getNode("K2").mat()
+    R1 = fs.getNode("R1").mat()
+    R2 = fs.getNode("R2").mat()
+    dist1 = fs.getNode("dist1").mat()
+    dist2 = fs.getNode("dist2").mat()
+    fs.release()
+
+    pts_left = np.asarray(pts_left, dtype = np.float32).reshape(-1,1,2)
+    pts_right = np.asarray(pts_right, dtype = np.float32).reshape(-1,1,2)
+
+    pts_left_rect = cv2.undistortPoints(pts_left, K1, dist1, R = R1, P = P1)
+    pts_right_rect = cv2.undistortPoints(pts_right, K2, dist2, R = R2, P = P2)
+
+        # Flatten back to (N, 2)
+    pts_left_rect = pts_left_rect.squeeze(1)
+    pts_right_rect = pts_right_rect.squeeze(1)
+
+    # Obtain 4D points and scale to 3D
+
+    points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
+    points3D = (points4D[:3] / points4D[3]).T * 100
+    points3D = np.squeeze(points3D)
+    print(points3D)
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection = '3d')
     
-print(np.mean(times))
+
+    ax.zaxis.set_inverted(True)
+    ax.view_init(elev = 20, azim = 50, roll = 0)   
+    
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z') 
+    
+
+    ax.scatter(points3D[:, 0], points3D[:, 1], points3D[:, 2], color = (196 / 255, 12 / 255, 27 / 255), s = 15)
+    for start, end in HAND_SKELETON:
+        ax.plot(
+            [points3D[start, 0], points3D[end, 0]],
+            [points3D[start, 1], points3D[end, 1]],
+            [points3D[start, 2], points3D[end, 2]],
+            'b-'
+        )    
+    plt.title("3D Mapped Hand Skeleton Keypoints (In Centimeters)")
+    plt.show()
