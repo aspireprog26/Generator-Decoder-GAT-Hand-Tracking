@@ -32,7 +32,7 @@ class Video():
 
     def loadStereoCalib(self):
         # Load calibrated camera features
-        fs = cv2.FileStorage(r"C:\Users\Test\Documents\Hand-Tracking\Stereo\stereo2.yml", cv2.FILE_STORAGE_READ)
+        fs = cv2.FileStorage(r"C:\Users\Test\Documents\Hand-Tracking\Stereo\stereo.yml", cv2.FILE_STORAGE_READ)
         self.P1 = fs.getNode("P1").mat()
         self.P2 = fs.getNode("P2").mat()
         self.K1 = fs.getNode("K1").mat()

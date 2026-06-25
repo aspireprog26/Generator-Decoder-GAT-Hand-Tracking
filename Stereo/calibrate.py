@@ -8,7 +8,7 @@ DIR = r"C:\Users\Test\Documents\StereoImages\Stereo2"
 
 def calibrate():
     dir = Path(DIR)
-    fs = cv2.FileStorage(r"C:\Users\Test\Documents\Hand-Tracking\Stereo\stereo2.yml", cv2.FILE_STORAGE_WRITE)
+    fs = cv2.FileStorage(r"C:\Users\Test\Documents\Hand-Tracking\Stereo\stereo.yml", cv2.FILE_STORAGE_WRITE)
     img_size = None
     
     objp = np.zeros((PATTERN_SIZE[0]*PATTERN_SIZE[1], 3), np.float32)       # Create an empty array to store 3D points of shape (num_corners, 3) with each row (X, Y, Z)
