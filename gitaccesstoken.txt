@@ -1,2 +1,0 @@
-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
-pip install -r colabreq.txt

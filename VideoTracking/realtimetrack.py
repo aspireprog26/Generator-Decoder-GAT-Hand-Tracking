@@ -5,7 +5,9 @@ from pynput import keyboard
 from threading import Thread
 import matplotlib.pyplot as plt
 
-sys.path.insert(1, r"C:\Users\Test\Documents\Hand-Tracking\Model")
+sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking\Model")
+sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking\Utils")
+import utility as ut
 import keypointdetection as kp  # type: ignore
 
 CAM = 1
@@ -59,18 +61,6 @@ class Video():
             self.lines.append(line)
 
         plt.title("3D Mapped Hand Skeleton Keypoints (In Centimeters)")
-
-    def ema(self, arr, alpha, axis):
-        arr = np.asarray(arr)
-        x = np.moveaxis(arr, axis, 0)
-
-        y = np.empty_like(x, dtype = float)
-        y[0] = x[0]
-
-        for i in range(1, x.shape[0]):
-            y[i] = alpha * x[i] + (1 - alpha) * y[i - 1]
-
-        return np.moveaxis(y, 0, axis)
             
     def take_frame(self):
         while self.running:
@@ -88,8 +78,8 @@ class Video():
                 right = self.last_frame[:, half:]
                 kp_frame = self.pose.get_keypoints(left, right)
 
-                avg_score_right = self.ema(kp_frame[1][1], self.alpha, 0)                
-                avg_score_left = self.ema(kp_frame[1][0], self.alpha, 0)
+                avg_score_right = ut.ema(kp_frame[1][1], self.alpha, 0)                
+                avg_score_left = ut.ema(kp_frame[1][0], self.alpha, 0)
 
                 self.avg_left_coord = kp_frame[0][0]
                 self.avg_right_coord = kp_frame[0][1]
