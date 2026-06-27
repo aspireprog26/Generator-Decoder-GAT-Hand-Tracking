@@ -298,8 +298,8 @@ class RTMPose:
     
 if __name__ == "__main__":
     # Hardcoded paths for this specific machine/project layout.
-    ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
-    FRAME_DIR = r"C:\Users\Test\Documents\Hand-Tracking\VideoTracking/"
+    ENGINE = "/content/drive/MyDrive/model.engine"
+    FRAME_DIR = "content/Hand-Tracking-2/VideoTracking/"
 
     # Create the model wrapper.
     pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
