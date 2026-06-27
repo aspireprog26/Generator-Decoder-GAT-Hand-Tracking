@@ -12,4 +12,5 @@ def ema(self, arr, alpha, axis):
 
     return np.moveaxis(y, 0, axis)
 
-def transformImage()
+def transformImg(orig_size, new_size):
+    None
