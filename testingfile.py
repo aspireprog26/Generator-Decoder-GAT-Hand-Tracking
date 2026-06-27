@@ -308,7 +308,7 @@ if __name__ == "__main__":
         engine = runtime.deserialize_cuda_engine(f.read())
 
     print("TensorRT version used at runtime:", trt.__version__)
-    
+    """
     # Create the model wrapper.
     pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
 
@@ -374,3 +374,4 @@ if __name__ == "__main__":
         )    
     plt.title("3D Mapped Hand Skeleton Keypoints (In Centimeters)")
     plt.show()
+    """
