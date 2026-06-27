@@ -1,0 +1,4 @@
+pycuda
+chainer
+pynput
+tensorrt

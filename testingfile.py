@@ -299,7 +299,7 @@ class RTMPose:
 if __name__ == "__main__":
     # Hardcoded paths for this specific machine/project layout.
     ENGINE = "/content/drive/MyDrive/model.engine"
-    FRAME_DIR = "content/Hand-Tracking-2/VideoTracking/"
+    FRAME_DIR = "/content/Hand-Tracking-2/VideoTracking/"
 
     # Create the model wrapper.
     pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
@@ -317,7 +317,7 @@ if __name__ == "__main__":
         pts_right.append(right_kps[i])
 
     # Load calibrated camera features
-    fs = cv2.FileStorage(r"C:\Users\Test\Documents\Hand-Tracking\Stereo\stereo.yml", cv2.FILE_STORAGE_READ)
+    fs = cv2.FileStorage("/content/Hand-Tracking-2/Stereo/stereo.yml", cv2.FILE_STORAGE_READ)
     P1 = fs.getNode("P1").mat()
     P2 = fs.getNode("P2").mat()
     K1 = fs.getNode("K1").mat()
