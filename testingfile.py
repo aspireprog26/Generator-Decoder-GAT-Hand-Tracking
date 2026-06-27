@@ -301,6 +301,14 @@ if __name__ == "__main__":
     ENGINE = "/content/drive/MyDrive/model.engine"
     FRAME_DIR = "/content/Hand-Tracking-2/VideoTracking/"
 
+    TRT_LOGGER = trt.Logger(trt.Logger.INFO)
+
+    with open(ENGINE, "rb") as f:
+        runtime = trt.Runtime(TRT_LOGGER)
+        engine = runtime.deserialize_cuda_engine(f.read())
+
+    print("TensorRT version used at runtime:", trt.__version__)
+    
     # Create the model wrapper.
     pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
 
