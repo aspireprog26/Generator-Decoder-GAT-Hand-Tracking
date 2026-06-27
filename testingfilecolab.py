@@ -28,7 +28,7 @@ class TRTEngine:
         self.logger = trt.Logger(trt.Logger.ERROR)      # Create TensorRT logger that only prints errors
         trt.init_libnvinfer_plugins(self.logger, "")   # Load any TensorRT plugins that are required by the engine
 
-        # Deserialize the engine from the disk
+        # Deserialize the engine from the disk using TensorRT 10 standards
         with open(self.engine_path, "rb") as f:
             runtime = trt.Runtime(self.logger)      
             self.engine = runtime.deserialize_cuda_engine(f.read())     
@@ -44,11 +44,11 @@ class TRTEngine:
         # Create cuda stream for asynchronous copies and inference
         self.stream = cuda.Stream()
 
-        # --- TENSORRT 10.x COMPATIBLE TENSOR PARSING ---
-        # Instead of 'bindings', we iterate through names using engine.num_io_tensors
+        # --- TENSORRT 10.x IO TENSOR MANAGEMENT ---
         self.input_names = []
         self.output_names = []
 
+        # Iterate through names using engine.num_io_tensors instead of num_bindings
         for i in range(self.engine.num_io_tensors):
             tensor_name = self.engine.get_tensor_name(i)
             mode = self.engine.get_tensor_mode(tensor_name)
@@ -62,33 +62,35 @@ class TRTEngine:
         if len(self.input_names) != 1:
             raise RuntimeError(f"Expected exactly 1 input, found {len(self.input_names)}.")
        
-        self.input_name = self.input_names[0]      # Main image input tensor name
+        self.input_name = self.input_names[0]      # Main input tensor name (e.g., 'input')
 
     def infer(self, input_array: np.ndarray):   
         if input_array.ndim != 4: 
             raise ValueError(f"Expected BCHW input, got shape {input_array.shape}.")
 
-        # --- STEP 1: SET INPUT SHAPES FIRST (Crucial for TensorRT 10.x Dynamic Models) ---
-        # Moving this to the very top resolves the dynamic output dimension issue
+        # --- STEP 1: FORCE EXPLICIT INPUT SIZE ON THE CONTEXT ---
+        # We query get_tensor_shape (TRT 10) instead of get_binding_shape (TRT 8)
         if -1 in tuple(self.engine.get_tensor_shape(self.input_name)):
             self.context.set_input_shape(self.input_name, input_array.shape)
         
-        # --- STEP 2: PREPARE AND BIND INPUT ADDRESS ---
+        # --- STEP 2: CONVERT AND ASSIGN INPUT BUFFER ADDRESS ---
         input_dtype = trt.nptype(self.engine.get_tensor_dtype(self.input_name))
         input_array = np.ascontiguousarray(input_array.astype(input_dtype, copy=False))
 
         d_input = cuda.mem_alloc(input_array.nbytes)
         cuda.memcpy_htod_async(d_input, input_array, self.stream)       
+        
+        # Bind the device memory pointer address directly to the context tensor name
         self.context.set_tensor_address(self.input_name, int(d_input))
 
-        # Lists to keep track of output buffers on CPU and GPU
         cpu_outputs = []
         gpu_outputs = []
         output_shapes = []
 
-        # --- STEP 3: ALLOCATE OUTPUTS (Now fully computed by TensorRT) ---
+        # --- STEP 3: ALLOCATE MEMORY FOR EVERY OUTPUT TENSOR ---
         for name in self.output_names:
-            # Because input shape was set above, this will read concrete bounds (e.g., [1, 17, 384])
+            # Because step 1 explicitly set the input shape on the context, 
+            # get_tensor_shape(name) will now read concrete bounds (e.g., [1, 17, 384]) instead of -1
             shape = tuple(self.context.get_tensor_shape(name))
             if any(dim < 0 for dim in shape):
                 raise RuntimeError(f"Output shape still dynamic for tensor {name}: {shape}.")
@@ -106,7 +108,7 @@ class TRTEngine:
             gpu_outputs.append(gpu_mem)
             output_shapes.append(shape)
         
-        # --- STEP 4: RUN INFERENCE ---
+        # --- STEP 4: RUN ASYNCHRONOUS INFERENCE (V3 API) ---
         self.context.execute_async_v3(stream_handle=self.stream.handle)
 
         # Copy each output back from gpu to cpu
@@ -119,7 +121,6 @@ class TRTEngine:
         # Reshape flat outputs into their original tensor shape
         outputs = [cpu.reshape(shape) for cpu, shape in zip(cpu_outputs, output_shapes)]
         return outputs
-    
 class RTMPose:
     def __init__(self, engine, frame_dir):
         self.engine = TRTEngine(engine)
