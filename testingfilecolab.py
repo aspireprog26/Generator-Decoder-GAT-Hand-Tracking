@@ -68,16 +68,15 @@ class TRTEngine:
         if input_array.ndim != 4: 
             raise ValueError(f"Expected BCHW input, got shape {input_array.shape}.")
 
-        # Tell TensorRT the actual shape of the input if the engine uses dynamic input shapes
-        # TensorRT 10 uses get_tensor_shape instead of get_binding_shape
+        # --- STEP 1: SET INPUT SHAPES FIRST (Crucial for TensorRT 10.x Dynamic Models) ---
+        # Moving this to the very top resolves the dynamic output dimension issue
         if -1 in tuple(self.engine.get_tensor_shape(self.input_name)):
             self.context.set_input_shape(self.input_name, input_array.shape)
         
-        # In TRT 10.x, we must explicitly set tensor addresses on the context
+        # --- STEP 2: PREPARE AND BIND INPUT ADDRESS ---
         input_dtype = trt.nptype(self.engine.get_tensor_dtype(self.input_name))
         input_array = np.ascontiguousarray(input_array.astype(input_dtype, copy=False))
 
-        # Allocate GPU memory for the input and copy host to device
         d_input = cuda.mem_alloc(input_array.nbytes)
         cuda.memcpy_htod_async(d_input, input_array, self.stream)       
         self.context.set_tensor_address(self.input_name, int(d_input))
@@ -87,9 +86,9 @@ class TRTEngine:
         gpu_outputs = []
         output_shapes = []
 
-        # Allocate memory for every output tensor using TRT 10 methods
+        # --- STEP 3: ALLOCATE OUTPUTS (Now fully computed by TensorRT) ---
         for name in self.output_names:
-            # Obtain the output shape from the execution context
+            # Because input shape was set above, this will read concrete bounds (e.g., [1, 17, 384])
             shape = tuple(self.context.get_tensor_shape(name))
             if any(dim < 0 for dim in shape):
                 raise RuntimeError(f"Output shape still dynamic for tensor {name}: {shape}.")
@@ -107,7 +106,7 @@ class TRTEngine:
             gpu_outputs.append(gpu_mem)
             output_shapes.append(shape)
         
-        # Run inference using the modern execute_async_v3 API (v2 is deprecated)
+        # --- STEP 4: RUN INFERENCE ---
         self.context.execute_async_v3(stream_handle=self.stream.handle)
 
         # Copy each output back from gpu to cpu
