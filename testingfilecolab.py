@@ -28,10 +28,10 @@ class TRTEngine:
         self.logger = trt.Logger(trt.Logger.ERROR)      # Create TensorRT logger that only prints errors
         trt.init_libnvinfer_plugins(self.logger, "")   # Load any TensorRT plugins that are required by the engine
 
-        # Deserialize the engine from the disk (rebuilds object from the TensorRT engine)
+        # Deserialize the engine from the disk
         with open(self.engine_path, "rb") as f:
-            runtime = trt.Runtime(self.logger)      # Load the runtime TensorRT logger
-            self.engine = runtime.deserialize_cuda_engine(f.read())     # deserialize into a TensorRT engine object to run inference
+            runtime = trt.Runtime(self.logger)      
+            self.engine = runtime.deserialize_cuda_engine(f.read())     
         
         if self.engine is None:
             raise RuntimeError(f"Failed to load TensorRT engine: {self.engine_path}.")
@@ -44,67 +44,73 @@ class TRTEngine:
         # Create cuda stream for asynchronous copies and inference
         self.stream = cuda.Stream()
 
-        # Identify all input bindings (GPU memory address that holds incoming data for model input layer)
-        self.input_indices = [i for i in range(self.engine.num_bindings) if self.engine.binding_is_input(i)]
+        # --- TENSORRT 10.x COMPATIBLE TENSOR PARSING ---
+        # Instead of 'bindings', we iterate through names using engine.num_io_tensors
+        self.input_names = []
+        self.output_names = []
 
-        # Identify all output bindings
-        self.output_indices = [i for i in range(self.engine.num_bindings) if not self.engine.binding_is_input(i)]
+        for i in range(self.engine.num_io_tensors):
+            tensor_name = self.engine.get_tensor_name(i)
+            mode = self.engine.get_tensor_mode(tensor_name)
+            
+            if mode == trt.TensorIOMode.INPUT:
+                self.input_names.append(tensor_name)
+            elif mode == trt.TensorIOMode.OUTPUT:
+                self.output_names.append(tensor_name)
   
         # Raise error if input length > 1 (this wrapper expects a single input tensor)
-        if len(self.input_indices) != 1:
-            raise RuntimeError(f"Expected exactly 1 input, found {len(self.input_indices)}.")
+        if len(self.input_names) != 1:
+            raise RuntimeError(f"Expected exactly 1 input, found {len(self.input_names)}.")
        
-        self.input_idx = self.input_indices[0]      # Takes binding 0 as input since thats the image. Bindings 1 and 2 are scores and coords
+        self.input_name = self.input_names[0]      # Main image input tensor name
 
-    def infer(self, input_array: np.ndarray):   # Expects an N-dimensional array (Or input tensor)
-        # TensorRT models expect BCHW input: Batch, Channels, Height, Width, raise error if lower dimension
+    def infer(self, input_array: np.ndarray):   
         if input_array.ndim != 4: 
             raise ValueError(f"Expected BCHW input, got shape {input_array.shape}.")
 
         # Tell TensorRT the actual shape of the input if the engine uses dynamic input shapes
-        if -1 in tuple(self.engine.get_binding_shape(self.input_idx)):
-            self.context.set_binding_shape(self.input_idx, input_array.shape)
+        # TensorRT 10 uses get_tensor_shape instead of get_binding_shape
+        if -1 in tuple(self.engine.get_tensor_shape(self.input_name)):
+            self.context.set_input_shape(self.input_name, input_array.shape)
         
-        bindings = [0] * self.engine.num_bindings       # create a list of zeros for every binding pointer in the TensorRT engine
-
-        # Convert the input to the engine's expected dtype and ensure contiguous memory (Stores data and processes in an uninterrupted, sequential block of memory addresses)
-        input_dtype = trt.nptype(self.engine.get_binding_dtype(self.input_idx))
-        input_array = np.ascontiguousarray(input_array.astype(input_dtype, copy = False))
+        # In TRT 10.x, we must explicitly set tensor addresses on the context
+        input_dtype = trt.nptype(self.engine.get_tensor_dtype(self.input_name))
+        input_array = np.ascontiguousarray(input_array.astype(input_dtype, copy=False))
 
         # Allocate GPU memory for the input and copy host to device
         d_input = cuda.mem_alloc(input_array.nbytes)
-        cuda.memcpy_htod_async(d_input, input_array, self.stream)       # asynchronously copies CPU input to GPU input
-        bindings[self.input_idx] = int(d_input)
+        cuda.memcpy_htod_async(d_input, input_array, self.stream)       
+        self.context.set_tensor_address(self.input_name, int(d_input))
 
         # Lists to keep track of output buffers on CPU and GPU
         cpu_outputs = []
         gpu_outputs = []
         output_shapes = []
 
-        # Allocate memory for every output tensor
-        for idx in self.output_indices:
+        # Allocate memory for every output tensor using TRT 10 methods
+        for name in self.output_names:
             # Obtain the output shape from the execution context
-            shape = tuple(self.context.get_binding_shape(idx))
+            shape = tuple(self.context.get_tensor_shape(name))
             if any(dim < 0 for dim in shape):
-                raise RuntimeError(f"Output shape still dynamic for binding {idx}: {shape}.")
+                raise RuntimeError(f"Output shape still dynamic for tensor {name}: {shape}.")
             
             # Determine output dtype and total number of elements
-            dtype = trt.nptype(self.engine.get_binding_dtype(idx))
+            dtype = trt.nptype(self.engine.get_tensor_dtype(name))
             size = int(np.prod(shape))
 
-            # Create CPU memory buffer for TensorRT to recieve output data copied back from the GPU
+            # Create CPU memory buffer and GPU destination memory
             cpu_mem = cuda.pagelocked_empty(size, dtype)
             gpu_mem = cuda.mem_alloc(cpu_mem.nbytes)
             
-            bindings[idx] = int(gpu_mem)
+            self.context.set_tensor_address(name, int(gpu_mem))
             cpu_outputs.append(cpu_mem)
             gpu_outputs.append(gpu_mem)
             output_shapes.append(shape)
         
-        # Run the engine asynchronously on the CUDA stream
-        self.context.execute_async_v2(bindings = bindings, stream_handle = self.stream.handle)
+        # Run inference using the modern execute_async_v3 API (v2 is deprecated)
+        self.context.execute_async_v3(stream_handle=self.stream.handle)
 
-        # COpy each output back from gpu to cpu
+        # Copy each output back from gpu to cpu
         for cpu_mem, gpu_mem in zip(cpu_outputs, gpu_outputs):
             cuda.memcpy_dtoh_async(cpu_mem, gpu_mem, self.stream)
         
@@ -114,7 +120,7 @@ class TRTEngine:
         # Reshape flat outputs into their original tensor shape
         outputs = [cpu.reshape(shape) for cpu, shape in zip(cpu_outputs, output_shapes)]
         return outputs
-
+    
 class RTMPose:
     def __init__(self, engine, frame_dir):
         self.engine = TRTEngine(engine)
