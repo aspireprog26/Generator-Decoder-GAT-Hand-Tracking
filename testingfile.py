@@ -298,7 +298,7 @@ class RTMPose:
     
 if __name__ == "__main__":
     # Hardcoded paths for this specific machine/project layout.
-    ENGINE = "/content/drive/MyDrive/model.engine"
+    ENGINE = "/content/drive/MyDrive/rtmpose.engine"
     FRAME_DIR = "/content/Hand-Tracking-2/VideoTracking/"
 
     TRT_LOGGER = trt.Logger(trt.Logger.INFO)
