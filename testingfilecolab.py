@@ -12,7 +12,6 @@ warnings.filterwarnings("ignore")
 
 # Define the Hand Skeleton connections. Each tuple draws a line between keypoints A and B
 # The keypoints indices match the model's output ordering.
-
 HAND_SKELETON = [ 
     (0, 1), (1, 2), (2, 3), (3, 4),
     (0, 5), (5, 6), (6, 7), (7, 8),
@@ -121,6 +120,7 @@ class TRTEngine:
         # Reshape flat outputs into their original tensor shape
         outputs = [cpu.reshape(shape) for cpu, shape in zip(cpu_outputs, output_shapes)]
         return outputs
+
 class RTMPose:
     def __init__(self, engine, frame_dir):
         self.engine = TRTEngine(engine)
@@ -145,13 +145,12 @@ class RTMPose:
     
     def preprocess(self, img_bgr: np.ndarray):
         # Normalize image array used by RTM vision backbone
-        mean = np.array([123.675, 116.28, 103.53], dtype = np.float32)
-        std = np.array([58.395, 57.12, 57.375], dtype = np.float32)
-
+        mean = np.array([123.675, 116.28, 103.53], dtype=np.float32)
+        std = np.array([58.395, 57.12, 57.375], dtype=np.float32)
 
         # load image as RGB from BGR
         img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, (self.input_w, self.input_h), interpolation = cv2.INTER_LINEAR)
+        img = cv2.resize(img, (self.input_w, self.input_h), interpolation=cv2.INTER_LINEAR)
         img = img.astype(np.float32)
         img = (img - mean) / std
 
@@ -160,135 +159,96 @@ class RTMPose:
         return img
     
     def decode_outputs(self, outputs):
-        """
-        RTMPose exports take different output forms depending on model export
-        Supported Forms:
-        1) One Output: (B, K, 2) or (B, K, 3) -> Direct Coordinates
-        2) One Output: (B, K, H, W) -> Heatmaps
-        3) Two Outputs: (B, K, L) -> SimCC-style x,y distributions
-        """
-
         if len(outputs) == 1:
             out = outputs[0]
-
-            # Direct coordinate output: last dimension contains x, y and confidence
             if out.ndim == 3 and out.shape[-1] in (2, 3):
                 coords = out[..., :2].astype(np.float32)
                 if out.shape[-1] == 3:
                     scores = out[..., 2].astype(np.float32)
                 else:
-                    scores = np.ones(coords.shape[:2], dtype = np.float32)
+                    scores = np.ones(coords.shape[:2], dtype=np.float32)
                 return coords, scores
             
-            # Heatmap output: Find the maximum probability pixel for each keypoint
             if out.ndim == 4:
                 b, k, h, w = out.shape
-                coords = np.zeros((b, k, 2), dtype = np.float32)
-                scores = np.zeros((b, k), dtype = np.float32)
-
+                coords = np.zeros((b, k, 2), dtype=np.float32)
+                scores = np.zeros((b, k), dtype=np.float32)
                 for bi in range(b):
                     for ki in range(k):
                         heatmap = out[bi, ki]
                         pos = int(np.argmax(heatmap))
                         y, x = divmod(pos, w)
-
-                        # Convert heatmap coordinates to input-image coordinates
                         coords[bi, ki, 0] = x * (self.input_w / max(w - 1, 1))
                         coords[bi, ki, 1] = y * (self.input_h / max(h - 1, 1))
                         scores[bi, ki] = float(heatmap[y, x])
-                
                 return coords, scores
             
-        # SimCC-style output distributions for x and y
         if len(outputs) >= 2:
             x_out, y_out = outputs[0], outputs[1]
-
-            if x_out.ndim == 3 and y_out.ndim == 3 and y_out.shape[:2]:
+            if x_out.ndim == 3 and y_out.ndim == 3:
                 b, k, lx = x_out.shape
                 _, _, ly = y_out.shape
-                coords = np.zeros((b, k, 2), dtype = np.float32)
-                scores = np.zeros((b, k), dtype = np.float32)
-
+                coords = np.zeros((b, k, 2), dtype=np.float32)
+                scores = np.zeros((b, k), dtype=np.float32)
                 for bi in range(b):
                     for ki in range(k):
                         x_pos = int(np.argmax(x_out[bi, ki]))
                         y_pos = int(np.argmax(y_out[bi, ki]))
-                        
-                        # Convert distribution indixes into input-image coordinates
                         coords[bi, ki, 0] = x_pos * (self.input_w / max(lx - 1, 1))
                         coords[bi, ki, 1] = y_pos * (self.input_h / max(ly - 1, 1))
-
-                        # Approximate confidence by combining best x and y probabilities
                         scores[bi, ki] = float(x_out[bi, ki, x_pos] * y_out[bi, ki, y_pos])
-                
                 return coords, scores
 
     def orig_scale(self, coords, orig_w, orig_h):
-        # Make a float copy so we can rescale coordinates without modifying the original array
         scaled = coords.copy().astype(np.float32)
-
-        # Rescales x and y coordinates to original size 
         scaled[..., 0] = scaled[..., 0] * (orig_w / float(self.input_w))
         scaled[..., 1] = scaled[..., 1] * (orig_h / float(self.input_h))
-
         return scaled   
 
     def draw_hand(self, img_bgr, coords, scores):
         vis = img_bgr.copy()
-
-        # Draw the bones first so the keypoint circles appear on top
         for a, b in HAND_SKELETON:
             if a in coords and b in coords:
-                # Skip low confidence keypoints
                 if scores[a] < self.conf or scores[b] < self.conf:
                     continue
-            
                 p1 = coords[a]
                 p2 = coords[b]
-
                 pt1 = (int(round(p1[0])), int(round(p1[1])))
                 pt2 = (int(round(p2[0])), int(round(p2[1])))
-                cv2.line(vis, pt1, pt2, (12, 27, 196), 2)      # Color the lines of the keypoint skeleton
+                cv2.line(vis, pt1, pt2, (12, 27, 196), 2)
 
-        # Draw each keypoint as filled circle with border
         for idx, pt in coords.items():
             if scores[idx] < self.conf:
                 continue
-
             center = (int(round(pt[0])), int(round(pt[1])))
-            cv2.circle(vis, center, 5, (0, 0, 255), -1)         # Inner circle
-            cv2.circle(vis, center, 5, (0, 0, 0), 1)      # Border circle  
-        
+            cv2.circle(vis, center, 5, (0, 0, 255), -1)
+            cv2.circle(vis, center, 5, (0, 0, 0), 1)  
         return vis
             
     def get_keypoints(self):
         results = []
-
         img = cv2.imread(str(self.frame_dir / "FrameIn" / "img.jpg"), cv2.IMREAD_COLOR)
+        if img is None:
+            raise FileNotFoundError(f"Missing base image path inside {self.frame_dir / 'FrameIn'}")
+        
         h, w = img.shape[:2]
         half = w // 2
-
         left  = img[:, :half]
         right = img[:, half:]  
         image_paths = [left, right]
         n = 0
         for image_path in image_paths:
             image = self.read_image(image_path)
-
-            # Preprocess and add batch dimension
-            batch = np.expand_dims(self.preprocess(image), axis = 0)
+            batch = np.expand_dims(self.preprocess(image), axis=0)
             outputs = self.engine.infer(batch)
 
             coords, scores = self.decode_outputs(outputs)
-            
-            # Remove exports with additional batch dimension
             if coords.ndim == 3:
                 coords = coords[0]
                 scores = scores[0]
             
-            # Scale coordinates back to original image size
-            h, w = image.shape[:2]      # Only takes height and width, ignores RGB channel
-            scaled_coords = self.orig_scale(coords, w, h)
+            h_orig, w_orig = image.shape[:2]
+            scaled_coords = self.orig_scale(coords, w_orig, h_orig)
 
             kp_coords = {}
             for i in range(scaled_coords.shape[0]):
@@ -299,37 +259,76 @@ class RTMPose:
             out =  str(n) + ".jpeg"
             cv2.imwrite(str(self.vis_dir / out), vis)
             n += 1
-        
         return results
 
-if __name__ == "__main__":
-    # Hardcoded paths for this specific machine/project layout.
+def run_pipeline():
     ENGINE = "/content/rtmpose_onnx/end2end.engine"
     FRAME_DIR = "/content/Hand-Tracking-2/VideoTracking/"
 
-    TRT_LOGGER = trt.Logger(trt.Logger.INFO)
-
     print("TensorRT version used at runtime:", trt.__version__)
 
-    # --- SAFE LIFECYCLE WRAPPING ---
-    # Nesting inside functions or using direct context blocks stops garbage-collection races
-    def run_pipeline():
-        # Create the model wrapper.
-        # This internally instantiates TRTEngine and hooks up the CUDA bindings.
-        pose = RTMPose(engine=ENGINE, frame_dir=FRAME_DIR)
+    # Create wrapper inside function scope to protect against asynchronous teardown errors
+    pose = RTMPose(engine=ENGINE, frame_dir=FRAME_DIR)
 
-        # Process keypoints
-        kps = pose.get_keypoints()
-        left_kps = kps[0]
-        right_kps = kps[1]
+    kps = pose.get_keypoints()
+    left_kps = kps[0]
+    right_kps = kps[1]
 
-        print("Keypoints parsed successfully from left and right frames.")
+    pts_left = []
+    pts_right = []
 
-        # --- Clean out local object allocations explicitly ---
-        # This guarantees Python releases GPU memory links *before* PyCUDA cleans the context
-        del pose
-        
-    # Execute everything within a functional boundary
+    for i in range(len(left_kps)):
+        pts_left.append(left_kps[i])
+        pts_right.append(right_kps[i])
+
+    # Load calibrated camera features
+    fs = cv2.FileStorage("/content/Hand-Tracking-2/Stereo/stereo.yml", cv2.FILE_STORAGE_READ)
+    P1 = fs.getNode("P1").mat()
+    P2 = fs.getNode("P2").mat()
+    K1 = fs.getNode("K1").mat()
+    K2 = fs.getNode("K2").mat()
+    R1 = fs.getNode("R1").mat()
+    R2 = fs.getNode("R2").mat()
+    dist1 = fs.getNode("dist1").mat()
+    dist2 = fs.getNode("dist2").mat()
+    fs.release()
+
+    pts_left = np.asarray(pts_left, dtype=np.float32).reshape(-1,1,2)
+    pts_right = np.asarray(pts_right, dtype=np.float32).reshape(-1,1,2)
+
+    pts_left_rect = cv2.undistortPoints(pts_left, K1, dist1, R=R1, P=P1)
+    pts_right_rect = cv2.undistortPoints(pts_right, K2, dist2, R=R2, P=P2)
+
+    pts_left_rect = pts_left_rect.squeeze(1)
+    pts_right_rect = pts_right_rect.squeeze(1)
+
+    points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
+    points3D = (points4D[:3] / points4D[3]).T * 100
+    points3D = np.squeeze(points3D)
+    print("Computed 3D coordinates:\n", points3D)
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.zaxis.set_inverted(True)
+    ax.view_init(elev=20, azim=50, roll=0)   
+    
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z') 
+    
+    ax.scatter(points3D[:, 0], points3D[:, 1], points3D[:, 2], color=(196/255, 12/255, 27/255), s=15)
+    for start, end in HAND_SKELETON:
+        ax.plot(
+            [points3D[start, 0], points3D[end, 0]],
+            [points3D[start, 1], points3D[end, 1]],
+            [points3D[start, 2], points3D[end, 2]],
+            'b-'
+        )    
+    plt.title("3D Mapped Hand Skeleton Keypoints (In Centimeters)")
+    plt.show()
+
+    # Force cleanup before global structures dissolve
+    del pose
+
+if __name__ == "__main__":
     run_pipeline()
-
-    print("Cleanup complete. Exiting smoothly without driver memory leaks!")
