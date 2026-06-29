@@ -6,8 +6,6 @@ from threading import Thread
 import matplotlib.pyplot as plt
 
 sys.path.insert(1, r"C:\Users\Test\Documents\Hand-Tracking\Model")
-sys.path.insert(1, r"C:\Users\Test\Documents\Hand-Tracking\Utils")
-import utility as ut
 import keypointdetection as kp  # type: ignore
 
 CAM = 1
@@ -108,15 +106,15 @@ class Video():
                         prev_ema_coord_l_arr = np.array(self.prev_ema_coord_l[i])
                         prev_ema_coord_r_arr = np.array(self.prev_ema_coord_r[i])
 
-                        self.prev_ema_coord_l[i] = ut.ema(left_coord_arr, self.alpha, prev_ema_coord_l_arr).tolist()
-                        self.prev_ema_coord_r[i] = ut.ema(right_coord_arr, self.alpha, prev_ema_coord_r_arr).tolist()
+                        self.prev_ema_coord_l[i] = self.ema(left_coord_arr, self.alpha, prev_ema_coord_l_arr).tolist()
+                        self.prev_ema_coord_r[i] = self.ema(right_coord_arr, self.alpha, prev_ema_coord_r_arr).tolist()
 
                 if self.prev_ema_score_l is None:
                     self.prev_ema_score_l = left_score.copy()
                     self.prev_ema_score_r = right_score.copy()
                 else:
-                    self.prev_ema_score_l = ut.ema(left_score, self.alpha, self.prev_ema_score_l)
-                    self.prev_ema_score_r = ut.ema(right_score, self.alpha, self.prev_ema_score_r)
+                    self.prev_ema_score_l = self.ema(left_score, self.alpha, self.prev_ema_score_l)
+                    self.prev_ema_score_r = self.ema(right_score, self.alpha, self.prev_ema_score_r)
 
                 left_frame = self.pose.draw_hand(left, self.prev_ema_coord_l, self.prev_ema_score_l)
                 right_frame = self.pose.draw_hand(right, self.prev_ema_coord_r, self.prev_ema_score_r)
@@ -166,7 +164,7 @@ class Video():
         if self.prev_points3D is None:
             self.prev_points3D = points3D.copy()
         else:
-            self.prev_points3D = ut.ema(points3D, self.alpha - 0.2, self.prev_points3D)
+            self.prev_points3D = self.ema(points3D, self.alpha - 0.2, self.prev_points3D)
 
         self.scatter._offsets3d = (self.prev_points3D[:, 0], self.prev_points3D[:, 1], self.prev_points3D[:, 2])
         
