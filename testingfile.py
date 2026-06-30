@@ -312,7 +312,7 @@ if __name__ == "__main__":
     pts_left = []
     pts_right = []
 
-    for i in range(len(left_kps)):
+    for i in range(21):
         pts_left.append(left_kps[i])
         pts_right.append(right_kps[i])
 
@@ -331,6 +331,7 @@ if __name__ == "__main__":
     pts_left = np.asarray(pts_left, dtype = np.float32).reshape(-1,1,2)
     pts_right = np.asarray(pts_right, dtype = np.float32).reshape(-1,1,2)
 
+    print(pts_left.shape)
     pts_left_rect = cv2.undistortPoints(pts_left, K1, dist1, R = R1, P = P1)
     pts_right_rect = cv2.undistortPoints(pts_right, K2, dist2, R = R2, P = P2)
 
