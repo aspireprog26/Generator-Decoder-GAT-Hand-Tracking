@@ -67,6 +67,7 @@ standardized_stats = {
 
 rtmpose = kp.RTMPose(ENGINE)
 tensor_count = 0 
+data = {}
 
 def rigidTransform(orig_coords):
     keypoints_bb = (ROTATION_MAT_BB @ orig_coords.T).T + TRANSLATION_VEC_BB     # Transpose to get (3, 3) x (3, 21) then transpose again for (21, 3) + (3, ) = (21, 3)
@@ -109,8 +110,8 @@ def generateTarget(coords_3d):
         ip_mcp_mag = np.linalg.norm(coords_IP - coords_MCP)
         mcp_cmc_mag = np.linalg.norm(coords_MCP - coords_CMC)
 
-        ratio_1 = tip_ip_mag / ip_mcp_mag
-        ratio_2 = ip_mcp_mag / mcp_cmc_mag
+        ratio_1 = tip_ip_mag / (ip_mcp_mag + 1e-5)
+        ratio_2 = ip_mcp_mag / (mcp_cmc_mag + 1e-5)
         ratio_vec = np.array([ratio_1, ratio_2])
 
         sgn_tip_ip = np.sign(coords_TIP[2] - coords_IP[2])
@@ -121,51 +122,70 @@ def generateTarget(coords_3d):
         target = np.concatenate((unit_CMC, unit_MCP, unit_IP, unit_TIP, dot_vec, sgn_vec, ratio_vec))
         targets[finger].append(target)
 
-def normalizeTargets():
-    ratio1_dict = {
-        0: [],
-        1: [],
-        2: [],
-        3: [],
-        4: []
-    }
+def normalizeTargets(mode):
+    if mode == "train":
+        ratio1_dict = {
+            0: [],
+            1: [],
+            2: [],
+            3: [],
+            4: []
+        }
 
-    ratio2_dict = {
-        0: [],
-        1: [],
-        2: [],
-        3: [],
-        4: []
-    }
+        ratio2_dict = {
+            0: [],
+            1: [],
+            2: [],
+            3: [],
+            4: []
+        }
 
-    for finger in range(5):
-        for target in targets[finger]:
-            ratios = target[-2:]
-            ratio1 = ratios[0]
-            ratio2 = ratios[1]
+        for finger in range(5):
+            for target in targets[finger]:
+                ratios = target[-2:]
+                ratio1 = ratios[0]
+                ratio2 = ratios[1]
 
-            ratio1_dict[finger].append(ratio1)
-            ratio2_dict[finger].append(ratio2)
-    
-    for finger in range(5):
-        mean_ratio1 = np.mean(np.log(ratio1_dict[finger]))
-        mean_ratio2 = np.mean(np.log(ratio2_dict[finger]))
-        std_ratio1 = np.std(np.log(ratio1_dict[finger]))
-        std_ratio2 = np.std(np.log(ratio2_dict[finger]))
-        ratio1_means.append(mean_ratio1)
-        ratio1_stds.append(std_ratio1)
-        ratio2_means.append(mean_ratio2)
-        ratio2_stds.append(std_ratio2)
-    
-    for finger in range(5):
-        for target in targets[finger]:
-            ratios = target[-2:]
-            ratio1 = ratios[0]
-            ratio2 = ratios[1]
+                ratio1_dict[finger].append(ratio1)
+                ratio2_dict[finger].append(ratio2)
+        
+        for finger in range(5):
+            mean_ratio1 = np.mean(np.log(ratio1_dict[finger]))
+            mean_ratio2 = np.mean(np.log(ratio2_dict[finger]))
+            std_ratio1 = np.std(np.log(ratio1_dict[finger]))
+            std_ratio2 = np.std(np.log(ratio2_dict[finger]))
 
-            new_ratio1 = (np.log(ratio1) - ratio1_means[finger]) / ratio1_stds[finger]
-            new_ratio2 = (np.log(ratio2) - ratio2_means[finger]) / ratio2_stds[finger]
-            ratios = [new_ratio1, new_ratio2]
+            ratio1_means.append(mean_ratio1)
+            ratio1_stds.append(std_ratio1)
+            ratio2_means.append(mean_ratio2)
+            ratio2_stds.append(std_ratio2)
+        
+        for finger in range(5):
+            for target in targets[finger]:
+                ratios = target[-2:]
+                ratio1 = ratios[0]
+                ratio2 = ratios[1]
+
+                new_ratio1 = (np.log(ratio1) - ratio1_means[finger]) / ratio1_stds[finger]
+                new_ratio2 = (np.log(ratio2) - ratio2_means[finger]) / ratio2_stds[finger]
+                target[-2:] = [new_ratio1, new_ratio2]
+    else:
+        ratio1_stats = data["ratio1"]
+        ratio2_stats = data["ratio2"]
+        for finger in range(5):
+            for target in targets[finger]:
+                ratios = np.log(target[-2:])
+                ratio1 = ratios[0]
+                ratio2 = ratios[1]
+
+                ratio1_mean = ratio1_stats[finger][0]
+                ratio1_std = ratio1_stats[finger][1]
+                ratio2_mean = ratio2_stats[finger][0]
+                ratio2_std = ratio2_stats[finger][1]
+
+                new_ratio1 = (ratio1 - ratio1_mean) / ratio1_std
+                new_ratio2 = (ratio2 - ratio2_mean) / ratio2_std
+                target[-2:] = [new_ratio1, new_ratio2]
 
 def getFinalTargetsVec():
     for i in range(len(targets[0])):
@@ -205,26 +225,55 @@ def saveInfo():
     with open(str(DIR / "standstats.json"), "w") as f:
         json.dump(standardized_stats, f, indent = 4)
 
-def getInputTarget():
-    standardized_x_left = zscore(np.array(x_coords_left), axis = 0)
-    standardized_y_left = zscore(np.array(y_coords_left), axis = 0)
-    standardized_x_right = zscore(np.array(x_coords_right), axis = 0)
-    standardized_y_right = zscore(np.array(y_coords_right), axis = 0)
+def getInputTarget(folder: str, use_stats):
+    x_coords_left = np.array(x_coords_left)
+    y_coords_left = np.array(y_coords_left)
+    x_coords_right = np.array(x_coords_right)
+    y_coords_right = np.array(y_coords_right)
 
-    remaining = 0
+    if use_stats:
+        standardized_x_left = zscore(x_coords_left, axis = 0)
+        standardized_y_left = zscore(y_coords_left, axis = 0)
+        standardized_x_right = zscore(x_coords_right, axis = 0)
+        standardized_y_right = zscore(y_coords_right, axis = 0)
+    else:
+        x_train_stand_left = data["x_train_stand_left"]
+        y_train_stand_left = data["y_train_stand_left"]
+        x_train_stand_right = data["x_train_stand_right"]
+        y_train_stand_right = data["y_train_stand_right"]
+
+        standardized_x_left = (x_coords_left - np.array(x_train_stand_left[0])) / np.array(x_train_stand_left[1])
+        standardized_y_left = (y_coords_left - np.array(y_train_stand_left[0])) / np.array(y_train_stand_left[1])
+        standardized_x_right = (x_coords_right - np.array(x_train_stand_right[0])) / np.array(x_train_stand_right[1])
+        standardized_y_right = (y_coords_right - np.array(y_train_stand_right[0])) / np.array(y_train_stand_right[1])
+
     for i in range(standardized_x_left.shape[0]):
-        input_vec = torch.tensor(np.concatenate((standardized_x_left[i], standardized_y_left[i], standardized_x_right[i], standardized_y_right[i])), dtype = torch.float)
+        input_vec = torch.tensor(
+            np.concatenate((
+                standardized_x_left[i], 
+                standardized_y_left[i], 
+                standardized_x_right[i], 
+                standardized_y_right[i]
+            )), 
+            dtype = torch.float
+        )
         target_vec = torch.tensor(target_vecs[i], dtype = torch.float)
-        dir = str(DIR / "Training" / (str(i).zfill(5) + ".pt"))
+        dir = str(DIR / folder / (str(i).zfill(5) + ".pt"))
         torch.save((input_vec, target_vec), dir)
-    
-def appendData():
-    error_dirs_left = []
-    error_dirs_right = []
-    count = 1
+
+def loop(start, end):
+    # Clear out all stuff before creating new dataset
+    x_coords_left.clear()
+    y_coords_left.clear()
+    x_coords_right.clear()
+    y_coords_right.clear()
+    for finger in targets:
+        targets[finger].clear()
+    target_vecs.clear()
+
     for bg in range(1, BG_COUNT + 1):
         for pose in POSES:
-            for n in range(1200):
+            for n in range(start, end):
                 left_img_dir = DIR / f"B{bg}{pose}" / "Left" / f"BB_left_{n}.png"
                 right_img_dir = DIR / f"B{bg}{pose}" / "Right" / f"BB_right_{n}.png"
                 
@@ -233,12 +282,10 @@ def appendData():
 
                 try:
                     kps = rtmpose.get_keypoints(left_img, right_img)
+                    left_kps = kps[0][0]
+                    right_kps = kps[0][1]
                 except: 
-                    error_dirs_left.append(left_img_dir)
-                    error_dirs_right.append(right_img_dir)
-                    
-                left_kps = kps[0][0]
-                right_kps = kps[0][1]
+                    pass
 
                 left_x = []
                 left_y = []
@@ -266,11 +313,31 @@ def appendData():
                 coords_3d = loadCoords(bg, pose, n)
                 generateTarget(coords_3d)
 
-                print(count)
-                count += 1
+def trainData():
+    loop(0, 1200)    
+    normalizeTargets("train")
+    getFinalTargetsVec()
+    saveInfo()
+    getInputTarget("Training", True)
 
-appendData()    
-normalizeTargets()
-getFinalTargetsVec()
-saveInfo()
-getInputTarget()
+def valData():
+    loop(1200, 1350)
+    normalizeTargets("val")
+    getFinalTargetsVec()
+    getInputTarget("Validation", False)
+
+def testData():
+    loop(1350, 1500)
+    normalizeTargets("test")
+    getFinalTargetsVec()
+    getInputTarget("Testing", False)
+
+def openData():
+    with open(str(DIR / "standstats.json"), "r") as f:
+        global data
+        data = json.load(f)
+
+trainData()
+openData()
+valData()
+testData()
