@@ -1,5 +1,4 @@
 import torch.nn as nn
-
 class AnatomyRegression(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
         super(AnatomyRegression, self).__init__()
@@ -20,5 +19,3 @@ class AnatomyRegression(nn.Module):
         x = self.relu(self.fc2(x))
         x = self.dropout2(x)
         out = self.out(x)
-
-        
