@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from pathlib import Path
 from scipy.io import loadmat
-from scipy.stats import zscore
+from torch_geometric.data import Data
 
 sys.path.insert(0, r"/home/mrtcloud-1/Documents/Hand-Tracking-2/Model")
 import keypointdetection as kp # type: ignore
@@ -29,17 +29,16 @@ TRANSLATION_VEC_BB = np.array([-24.0381, -0.4563, -1.2326], dtype = np.float32)
 RT_CAM_FX_LEFT = 591.6487
 RT_CAM_FY_LEFT = 590.5185
 RT_CAM_FX_RIGHT = 589.8875
-RT_CAM_FY_RIGHT = 588.7449
+RT_CAM_FX_RIGHT = 589.8875
 
 RT_CAM_CX_LEFT = 383.6427
 RT_CAM_CY_LEFT = 306.1255
 RT_CAM_CX_RIGHT = 383.7412
 RT_CAM_CY_RIGHT = 288.4137
                             
-x_coords_left = []
-y_coords_left = []
-x_coords_right = []
-y_coords_right = []
+# Accumulator lists for structured frame-by-frame storage
+left_coords_list = []   # Will store arrays of shape (21, 2)
+right_coords_list = []  # Will store arrays of shape (21, 2)
 
 ratio1_means = []
 ratio1_stds = []
@@ -57,10 +56,6 @@ targets = {
 target_vecs = []
 
 standardized_stats = {
-    "x_train_stand_left": [],
-    "y_train_stand_left": [],
-    "x_train_stand_right": [],
-    "y_train_stand_right": [],
     "ratio1": [],
     "ratio2": []
 }
@@ -70,14 +65,14 @@ tensor_count = 0
 data = {}
 
 def rigidTransform(orig_coords):
-    keypoints_bb = (ROTATION_MAT_BB @ orig_coords.T).T + TRANSLATION_VEC_BB     # Transpose to get (3, 3) x (3, 21) then transpose again for (21, 3) + (3, ) = (21, 3)
+    keypoints_bb = (ROTATION_MAT_BB @ orig_coords.T).T + TRANSLATION_VEC_BB     
     return keypoints_bb
 
 def loadCoords(bg, pose, frame):
     dir = LABEL_DIR / f"B{bg}{pose}_BB.mat"
     coords = loadmat(str(dir))["handPara"]
-    coords_transposed = np.transpose(coords, (2, 1, 0))     # Turns into shape (1500, 21, 3)
-    return coords_transposed[frame, ...]                    # Returns shape (21, 3)
+    coords_transposed = np.transpose(coords, (2, 1, 0))     
+    return coords_transposed[frame, ...]                    
 
 def normalize(x, y):
     x_new = (x - BB_CAM_CX) / BB_CAM_FX
@@ -124,21 +119,8 @@ def generateTarget(coords_3d):
 
 def normalizeTargets(mode):
     if mode == "train":
-        ratio1_dict = {
-            0: [],
-            1: [],
-            2: [],
-            3: [],
-            4: []
-        }
-
-        ratio2_dict = {
-            0: [],
-            1: [],
-            2: [],
-            3: [],
-            4: []
-        }
+        ratio1_dict = {0: [], 1: [], 2: [], 3: [], 4: []}
+        ratio2_dict = {0: [], 1: [], 2: [], 3: [], 4: []}
 
         for finger in range(5):
             for target in targets[finger]:
@@ -199,74 +181,28 @@ def getFinalTargetsVec():
         target_vecs.append(target_vec)
 
 def saveInfo():
-    x_coords_left_mean = np.mean(x_coords_left, axis = 0).tolist()
-    x_coords_left_std = np.std(x_coords_left, axis = 0).tolist()
-    x_coord_left_stats = [x_coords_left_mean, x_coords_left_std]
-
-    y_coords_left_mean = np.mean(y_coords_left, axis = 0).tolist()
-    y_coords_left_std = np.std(y_coords_left, axis = 0).tolist()
-    y_coord_left_stats = [y_coords_left_mean, y_coords_left_std]
-
-    x_coords_right_mean = np.mean(x_coords_right, axis = 0).tolist()
-    x_coords_right_std = np.std(x_coords_right, axis = 0).tolist()
-    x_coord_right_stats = [x_coords_right_mean, x_coords_right_std]
-
-    y_coords_right_mean = np.mean(y_coords_right, axis = 0).tolist()
-    y_coords_right_std = np.std(y_coords_right, axis = 0).tolist()
-    y_coord_right_stats = [y_coords_right_mean, y_coords_right_std]
-
-    standardized_stats["x_train_stand_left"] = x_coord_left_stats
-    standardized_stats["y_train_stand_left"] =  y_coord_left_stats
-    standardized_stats["x_train_stand_right"] = x_coord_right_stats
-    standardized_stats["y_train_stand_right"] = y_coord_right_stats
     standardized_stats["ratio1"] = list(zip(ratio1_means, ratio1_stds))
     standardized_stats["ratio2"] = list(zip(ratio2_means, ratio2_stds))
 
     with open(str(DIR / "standstats.json"), "w") as f:
         json.dump(standardized_stats, f, indent = 4)
 
-def getInputTarget(folder: str, use_stats):
-    x_coords_left_arr = np.array(x_coords_left)
-    y_coords_left_arr = np.array(y_coords_left)
-    x_coords_right_arr = np.array(x_coords_right)
-    y_coords_right_arr = np.array(y_coords_right)
-
-    if use_stats:
-        standardized_x_left = zscore(x_coords_left_arr, axis = 0)
-        standardized_y_left = zscore(y_coords_left_arr, axis = 0)
-        standardized_x_right = zscore(x_coords_right_arr, axis = 0)
-        standardized_y_right = zscore(y_coords_right_arr, axis = 0)
-    else:
-        x_train_stand_left = data["x_train_stand_left"]
-        y_train_stand_left = data["y_train_stand_left"]
-        x_train_stand_right = data["x_train_stand_right"]
-        y_train_stand_right = data["y_train_stand_right"]
-
-        standardized_x_left = (x_coords_left_arr - np.array(x_train_stand_left[0])) / np.array(x_train_stand_left[1])
-        standardized_y_left = (y_coords_left_arr - np.array(y_train_stand_left[0])) / np.array(y_train_stand_left[1])
-        standardized_x_right = (x_coords_right_arr - np.array(x_train_stand_right[0])) / np.array(x_train_stand_right[1])
-        standardized_y_right = (y_coords_right_arr - np.array(y_train_stand_right[0])) / np.array(y_train_stand_right[1])
-
-    for i in range(standardized_x_left.shape[0]):
-        input_vec = torch.tensor(
-            np.concatenate((
-                standardized_x_left[i], 
-                standardized_y_left[i], 
-                standardized_x_right[i], 
-                standardized_y_right[i]
-            )), 
-            dtype = torch.float
-        )
+def getInputTarget(folder: str):
+    # Process and save structured geometric arrays frame-by-frame
+    for i in range(len(left_coords_list)):
+        # Construct cleanly organized coordinate blocks for both hands -> shape (2, 21, 2)
+        structured_input = np.stack([left_coords_list[i], right_coords_list[i]], axis = 0)
+        
+        input_tensor = torch.tensor(structured_input, dtype = torch.float)
         target_vec = torch.tensor(target_vecs[i], dtype = torch.float)
-        dir = str(DIR / folder / (str(i).zfill(5) + ".pt"))
-        torch.save((input_vec, target_vec), dir)
+        
+        out_dir = str(DIR / folder / (str(i).zfill(5) + ".pt"))
+        torch.save((input_tensor, target_vec), out_dir)
 
 def loop(start, end):
-    # Clear out all stuff before creating new dataset
-    x_coords_left.clear()
-    y_coords_left.clear()
-    x_coords_right.clear()
-    y_coords_right.clear()
+    # Clear out lists before running subset loops
+    left_coords_list.clear()
+    right_coords_list.clear()
     for finger in targets:
         targets[finger].clear()
     target_vecs.clear()
@@ -289,28 +225,26 @@ def loop(start, end):
                     print(f"Skipping background: {bg}, pose: {pose}, frame: {n}.")
                     continue
 
-                left_x = []
-                left_y = []
-                right_x = []
-                right_y = []
+                frame_left_joints = []
+                frame_right_joints = []
 
                 for i in range(21):
-                    x_left = left_kps[i][0]
-                    y_left = left_kps[i][1]
-                    x_right = right_kps[i][0]
-                    y_right = right_kps[i][1]
+                    x_norm_left, y_norm_left = normalize(left_kps[i][0], left_kps[i][1])
+                    x_norm_right, y_norm_right = normalize(right_kps[i][0], right_kps[i][1])
                     
-                    x_norm_left, y_norm_left = normalize(x_left, y_left)
-                    x_norm_right, y_norm_right = normalize(x_right, y_right)
-                    left_x.append(x_norm_left)
-                    left_y.append(y_norm_left)
-                    right_x.append(x_norm_right)
-                    right_y.append(y_norm_right)
+                    frame_left_joints.append([x_norm_left, y_norm_left])
+                    frame_right_joints.append([x_norm_right, y_norm_right])
 
-                x_coords_left.append(left_x)
-                y_coords_left.append(left_y)
-                x_coords_right.append(right_x)
-                y_coords_right.append(right_y)
+                # Convert to arrays -> shape (21, 2)
+                arr_left = np.array(frame_left_joints)
+                arr_right = np.array(frame_right_joints)
+
+                # Make all joint coordinates relative to the frame's wrist position (Index 0)
+                rel_left = arr_left - arr_left[0]
+                rel_right = arr_right - arr_right[0]
+
+                left_coords_list.append(rel_left)
+                right_coords_list.append(rel_right)
 
                 coords_3d = loadCoords(bg, pose, n)
                 generateTarget(coords_3d)
@@ -323,19 +257,19 @@ def trainData():
     normalizeTargets("train")
     getFinalTargetsVec()
     saveInfo()
-    getInputTarget("Training", True)
+    getInputTarget("Training")
 
 def valData():
     loop(1200, 1350)
     normalizeTargets("val")
     getFinalTargetsVec()
-    getInputTarget("Validation", False)
+    getInputTarget("Validation")
 
 def testData():
     loop(1350, 1500)
     normalizeTargets("test")
     getFinalTargetsVec()
-    getInputTarget("Testing", False)
+    getInputTarget("Testing")
 
 def openData():
     with open(str(DIR / "standstats.json"), "r") as f:
@@ -346,3 +280,47 @@ trainData()
 openData()
 valData()
 testData()
+
+# Your original edge connections remain exactly the same
+hand_edge_index = torch.tensor([
+    [0, 1, 0, 5, 0, 9, 0, 13, 0, 17, 1, 2, 2, 3, 3, 4, 5, 6, 6, 7, 7, 8, 9, 10, 10, 11, 11, 12, 13, 14, 14, 15, 15, 16, 17, 18, 18, 19, 19, 20],
+    [1, 0, 5, 0, 9, 0, 13, 0, 17, 0, 2, 1, 3, 2, 4, 3, 6, 5, 7, 6, 8, 7, 10, 9, 11, 10, 12, 11, 14, 13, 15, 14, 16, 15, 18, 17, 19, 18, 20, 19]
+])
+
+def createGraphDataset(mode):
+    dataset = []
+    stereo_dir = Path("/home/mrtcloud-1/Documents/StereoDataset/")
+    
+    if mode == "train":
+        dir = stereo_dir / "Training"
+    elif mode == "val":
+        dir = stereo_dir / "Validation"
+    else:
+        dir = stereo_dir / "Testing"
+    
+    # Track existing .pt sample files, excluding any previously saved dataset.pt
+    for path in sorted(dir.glob("*.pt")):
+        if path.name == "dataset.pt":
+            continue
+            
+        input_tensor, target = torch.load(path)
+        
+        # input_tensor is now structured as shape (2, 21, 2)
+        # index 0 is left hand joint coordinate grid, index 1 is right hand
+        coords_left = input_tensor[0]   # Shape: (21, 2)
+        coords_right = input_tensor[1]  # Shape: (21, 2)
+        
+        # Wrap directly into PyTorch Geometric Data objects
+        left_graph = Data(x = coords_left, edge_index = hand_edge_index)
+        right_graph = Data(x = coords_right, edge_index = hand_edge_index)
+        
+        data_pt = (left_graph, right_graph, target)
+        dataset.append(data_pt)
+        
+    torch.save(dataset, dir / "dataset.pt")
+    print(f"Successfully processed and built dataset.pt for {mode} mode.")
+
+if __name__ == "__main__":
+    createGraphDataset("train")
+    createGraphDataset("val")
+    createGraphDataset("test")

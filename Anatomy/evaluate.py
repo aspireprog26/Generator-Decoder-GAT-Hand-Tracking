@@ -1,8 +1,8 @@
-import json
 import torch
 import warnings
 import numpy as np
 import torch.nn as nn
+from train import configs
 from pathlib import Path
 from model import AnatomyRegression
 from dataset import StereoHandDataset
@@ -12,9 +12,6 @@ warnings.filterwarnings("ignore", message = "TypedStorage is deprecated")
 
 def nmse(target, prediction):
     return np.mean((target - prediction) ** 2) / np.var(target)
-
-with open("/home/mrtcloud-1/Documents/Hand-Tracking-2/Anatomy/configs.json", "r") as f:
-    configs = json.load(f)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = AnatomyRegression(configs["input_size"], configs["hidden_size"], configs["output_size"]).to(device)
