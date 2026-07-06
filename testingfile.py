@@ -306,6 +306,7 @@ if __name__ == "__main__":
 
     # Warm up the GPU / TensorRT execution path before timing.
     kps = pose.get_keypoints()
+    
     left_kps = kps[0]
     right_kps = kps[1]
 

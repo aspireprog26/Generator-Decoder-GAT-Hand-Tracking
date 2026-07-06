@@ -226,26 +226,26 @@ def saveInfo():
         json.dump(standardized_stats, f, indent = 4)
 
 def getInputTarget(folder: str, use_stats):
-    x_coords_left = np.array(x_coords_left)
-    y_coords_left = np.array(y_coords_left)
-    x_coords_right = np.array(x_coords_right)
-    y_coords_right = np.array(y_coords_right)
+    x_coords_left_arr = np.array(x_coords_left)
+    y_coords_left_arr = np.array(y_coords_left)
+    x_coords_right_arr = np.array(x_coords_right)
+    y_coords_right_arr = np.array(y_coords_right)
 
     if use_stats:
-        standardized_x_left = zscore(x_coords_left, axis = 0)
-        standardized_y_left = zscore(y_coords_left, axis = 0)
-        standardized_x_right = zscore(x_coords_right, axis = 0)
-        standardized_y_right = zscore(y_coords_right, axis = 0)
+        standardized_x_left = zscore(x_coords_left_arr, axis = 0)
+        standardized_y_left = zscore(y_coords_left_arr, axis = 0)
+        standardized_x_right = zscore(x_coords_right_arr, axis = 0)
+        standardized_y_right = zscore(y_coords_right_arr, axis = 0)
     else:
         x_train_stand_left = data["x_train_stand_left"]
         y_train_stand_left = data["y_train_stand_left"]
         x_train_stand_right = data["x_train_stand_right"]
         y_train_stand_right = data["y_train_stand_right"]
 
-        standardized_x_left = (x_coords_left - np.array(x_train_stand_left[0])) / np.array(x_train_stand_left[1])
-        standardized_y_left = (y_coords_left - np.array(y_train_stand_left[0])) / np.array(y_train_stand_left[1])
-        standardized_x_right = (x_coords_right - np.array(x_train_stand_right[0])) / np.array(x_train_stand_right[1])
-        standardized_y_right = (y_coords_right - np.array(y_train_stand_right[0])) / np.array(y_train_stand_right[1])
+        standardized_x_left = (x_coords_left_arr - np.array(x_train_stand_left[0])) / np.array(x_train_stand_left[1])
+        standardized_y_left = (y_coords_left_arr - np.array(y_train_stand_left[0])) / np.array(y_train_stand_left[1])
+        standardized_x_right = (x_coords_right_arr - np.array(x_train_stand_right[0])) / np.array(x_train_stand_right[1])
+        standardized_y_right = (y_coords_right_arr - np.array(y_train_stand_right[0])) / np.array(y_train_stand_right[1])
 
     for i in range(standardized_x_left.shape[0]):
         input_vec = torch.tensor(
@@ -271,6 +271,7 @@ def loop(start, end):
         targets[finger].clear()
     target_vecs.clear()
 
+    count = 0
     for bg in range(1, BG_COUNT + 1):
         for pose in POSES:
             for n in range(start, end):
@@ -312,6 +313,9 @@ def loop(start, end):
 
                 coords_3d = loadCoords(bg, pose, n)
                 generateTarget(coords_3d)
+                
+                count += 1
+                print(count)
 
 def trainData():
     loop(0, 1200)    

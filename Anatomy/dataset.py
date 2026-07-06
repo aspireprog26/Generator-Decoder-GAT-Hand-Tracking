@@ -3,7 +3,7 @@ from pathlib import Path
 from torch.utils.data import Dataset
 
 class StereoHandDataset(Dataset):
-    def __init__(self, data_dir, mode):
+    def __init__(self, data_dir: str, mode: str):
         stereo_dir = Path(data_dir)
         if mode == "train":
             dir = stereo_dir / "Training"

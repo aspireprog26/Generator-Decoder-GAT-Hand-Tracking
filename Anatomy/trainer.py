@@ -1,20 +1,21 @@
-import sys
 import torch
-
-sys.path.insert(0, r"/home/mrtcloud-1/Documents/Hand-Tracking-2/Anatomy")
+import torch.nn as nn
+import torch.optim as optim
+from pathlib import Path
 import earlystopper as es
+from torch.utils.data import DataLoader
 class Trainer:
-    def __init__(self, configs, model, train_loader, val_loader):
-        self.optimizer = configs["optimizer"]
-        self.criterion = configs["criterion"]
+    def __init__(self, model: nn.Module, configs: dict, train_loader: DataLoader, val_loader: DataLoader, criterion: nn, optimizer: optim):
         self.model = model
-        self.num_epochs = configs["num_epochs"]
         self.train_loader = train_loader
         self.val_loader = val_loader
-        self.early_stop_patience = configs["es_patience"]
-        self.min_delta = configs["es_thresh"]
-        self.model_save_path = "/home/mrtcloud-1/Documents/Hand-Tracking-2/Anatomy/model.pth"
-        self.early_stopper = es.EarlyStopping()
+        self.optimizer = optimizer
+        self.criterion = criterion
+        self.num_epochs = configs["num_epochs"]
+        min_delta = configs["es_thresh"]
+        patience = configs["es_patience"]
+        model_save_path = Path(configs["model_dir"]) / configs["model_name"]
+        self.early_stopper = es.EarlyStopping(patience, min_delta, model_save_path)
 
     def train(self):
         for epoch in range(self.num_epochs):
@@ -38,7 +39,7 @@ class Trainer:
                     val_loss += loss.item()
             val_loss /= len(self.val_loader)
 
-            print(f"Epoch {epoch} | Train Loss: {train_loss} Val Loss: {val_loss}")
+            print(f"Epoch {epoch} | Train Loss: {train_loss} | Val Loss: {val_loss}")
             self.early_stopper(val_loss, self.model)
 
             if self.early_stopper.stopping:

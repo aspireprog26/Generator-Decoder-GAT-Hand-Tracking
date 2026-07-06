@@ -5,8 +5,8 @@ class EarlyStopping:
     def __init__(self, patience, min_delta, path):
         self.patience = patience
         self.min_delta = min_delta
-        self.path = patience
-
+        self.path = path
+        
         self.best_loss = np.inf
         self.counter = 0
         self.stopping = False
@@ -18,6 +18,5 @@ class EarlyStopping:
             torch.save(model.state_dict(), self.path)
         else:
             self.counter += 1 
-            print(f"Early Stop Count: {self.counter} / {self.patience}")
             if self.counter >= self.patience:
                 self.stopping = True
