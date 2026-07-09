@@ -9,9 +9,9 @@ from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
 configs = {
-    "lr": 1e-3,
-    "batch_size": 64,
-    "input_size": 2,
+    "lr": 1e-4,
+    "batch_size": 32,
+    "input_size": 4,
     "output_size": 100,
     "num_workers": 2,
     "num_epochs": 250,
@@ -19,7 +19,7 @@ configs = {
     "model_dir": "/home/mrtcloud-1/Documents/Hand-Tracking-2/Anatomy",
     "model_name": "anatomy.pth",
     "data_dir": "/home/mrtcloud-1/Documents/StereoDataset",
-    "es_patience": 5,
+    "es_patience": 10,
     "es_thresh": 1e-4,
     "drop_last": False
 }

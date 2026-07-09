@@ -38,7 +38,7 @@ class TRTEngine:
         self.context = self.engine.create_execution_context()
         if self.context is None:
             raise RuntimeError("Failed to create TensorRT execution context.")
-        
+
         # Create cuda stream for asynchronous copies and inference
         self.stream = cuda.Stream()
 

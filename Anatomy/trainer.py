@@ -51,7 +51,6 @@ class Trainer:
                     edge_right = right_batch.edge_index
                     batch_right = right_batch.batch
 
-                    self.optimizer.zero_grad()
                     output = self.model(left_coords, right_coords, edge_left, edge_right, batch_left, batch_right)
                     loss = self.criterion(output, target)
                     val_loss += loss.item()

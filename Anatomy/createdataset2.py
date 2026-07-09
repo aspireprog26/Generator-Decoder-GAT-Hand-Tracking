@@ -37,8 +37,8 @@ RT_CAM_CX_RIGHT = 383.7412
 RT_CAM_CY_RIGHT = 288.4137
                             
 # Accumulator lists for structured frame-by-frame storage
-left_coords_list = []   # Will store arrays of shape (21, 2)
-right_coords_list = []  # Will store arrays of shape (21, 2)
+left_features_list = []   # Will store arrays of shape (21, 2)
+right_features_list = []  # Will store arrays of shape (21, 2)
 
 ratio1_means = []
 ratio1_stds = []
@@ -91,10 +91,10 @@ def generateTarget(coords_3d):
         coords_IP = np.asarray(rigidTransform(coords_3d)[IP])
         coords_TIP = np.asarray(rigidTransform(coords_3d)[TIP])
         
-        unit_CMC = coords_CMC / np.linalg.norm(coords_CMC)
-        unit_MCP = coords_MCP / np.linalg.norm(coords_MCP)
-        unit_IP = coords_IP / np.linalg.norm(coords_IP)
-        unit_TIP = coords_TIP / np.linalg.norm(coords_TIP)
+        unit_CMC = coords_CMC / (np.linalg.norm(coords_CMC) + 1e-5)
+        unit_MCP = coords_MCP / (np.linalg.norm(coords_MCP) + 1e-5)
+        unit_IP = coords_IP / (np.linalg.norm(coords_IP) + 1e-5)
+        unit_TIP = coords_TIP / (np.linalg.norm(coords_TIP) + 1e-5)
 
         cmc_dot_mcp = np.dot(unit_CMC, unit_MCP)
         mcp_dot_ip = np.dot(unit_MCP, unit_IP)
@@ -125,8 +125,8 @@ def normalizeTargets(mode):
         for finger in range(5):
             for target in targets[finger]:
                 ratios = target[-2:]
-                ratio1 = ratios[0]
-                ratio2 = ratios[1]
+                ratio1 = ratios[0] + 1e-5
+                ratio2 = ratios[1] + 1e-5
 
                 ratio1_dict[finger].append(ratio1)
                 ratio2_dict[finger].append(ratio2)
@@ -138,15 +138,15 @@ def normalizeTargets(mode):
             std_ratio2 = np.std(np.log(ratio2_dict[finger]))
 
             ratio1_means.append(mean_ratio1)
-            ratio1_stds.append(std_ratio1)
+            ratio1_stds.append(max(std_ratio1, 1e-5))
             ratio2_means.append(mean_ratio2)
-            ratio2_stds.append(std_ratio2)
+            ratio2_stds.append(max(std_ratio2, 1e-5))
         
         for finger in range(5):
             for target in targets[finger]:
                 ratios = target[-2:]
-                ratio1 = ratios[0]
-                ratio2 = ratios[1]
+                ratio1 = ratios[0] + 1e-5
+                ratio2 = ratios[1] + 1e-5
 
                 new_ratio1 = (np.log(ratio1) - ratio1_means[finger]) / ratio1_stds[finger]
                 new_ratio2 = (np.log(ratio2) - ratio2_means[finger]) / ratio2_stds[finger]
@@ -156,7 +156,7 @@ def normalizeTargets(mode):
         ratio2_stats = data["ratio2"]
         for finger in range(5):
             for target in targets[finger]:
-                ratios = np.log(target[-2:])
+                ratios = np.log(target[-2:] + 1e-5)
                 ratio1 = ratios[0]
                 ratio2 = ratios[1]
 
@@ -188,10 +188,9 @@ def saveInfo():
         json.dump(standardized_stats, f, indent = 4)
 
 def getInputTarget(folder: str):
-    # Process and save structured geometric arrays frame-by-frame
-    for i in range(len(left_coords_list)):
-        # Construct cleanly organized coordinate blocks for both hands -> shape (2, 21, 2)
-        structured_input = np.stack([left_coords_list[i], right_coords_list[i]], axis = 0)
+    for i in range(len(left_features_list)):
+        # Construct cleanly organized coordinate blocks for both hands -> shape (2, 21, 4)
+        structured_input = np.stack([left_features_list[i], right_features_list[i]], axis = 0)
         
         input_tensor = torch.tensor(structured_input, dtype = torch.float)
         target_vec = torch.tensor(target_vecs[i], dtype = torch.float)
@@ -201,8 +200,8 @@ def getInputTarget(folder: str):
 
 def loop(start, end):
     # Clear out lists before running subset loops
-    left_coords_list.clear()
-    right_coords_list.clear()
+    left_features_list.clear()
+    right_features_list.clear()
     for finger in targets:
         targets[finger].clear()
     target_vecs.clear()
@@ -225,26 +224,49 @@ def loop(start, end):
                     print(f"Skipping background: {bg}, pose: {pose}, frame: {n}.")
                     continue
 
-                frame_left_joints = []
-                frame_right_joints = []
+                left_joints = []
+                right_joints = []
+                raw_coords_left = []
+                raw_coords_right = []
 
                 for i in range(21):
                     x_norm_left, y_norm_left = normalize(left_kps[i][0], left_kps[i][1])
                     x_norm_right, y_norm_right = normalize(right_kps[i][0], right_kps[i][1])
                     
-                    frame_left_joints.append([x_norm_left, y_norm_left])
-                    frame_right_joints.append([x_norm_right, y_norm_right])
+                    raw_coords_left.append([left_kps[i][0], left_kps[i][1]])
+                    raw_coords_right.append([right_kps[i][0], right_kps[i][1]])
+                    left_joints.append([x_norm_left, y_norm_left])
+                    right_joints.append([x_norm_right, y_norm_right])
 
                 # Convert to arrays -> shape (21, 2)
-                arr_left = np.array(frame_left_joints)
-                arr_right = np.array(frame_right_joints)
+                arr_left = np.array(left_joints)
+                arr_right = np.array(right_joints)
+                raw_arr_left = np.array(raw_coords_left)
+                raw_arr_right = np.array(raw_coords_right)
 
-                # Make all joint coordinates relative to the frame's wrist position (Index 0)
-                rel_left = arr_left - arr_left[0]
-                rel_right = arr_right - arr_right[0]
+                # Make all joint coordinates relative to the frame's wrist position (Index 0) and range of thumb to pinky
+                range_x_left = raw_arr_left[20][0] - raw_arr_left[4][0]
+                range_x_right = raw_arr_right[20][0] - raw_arr_right[4][0]
+                range_y_left = raw_arr_left[12][1] - raw_arr_left[0][1]
+                range_y_right = raw_arr_right[12][1] - raw_arr_right[0][1]
+                
+                if range_x_left == 0 or range_x_right == 0 or range_y_left == 0 or range_y_right == 0:
+                    print(f"Skipping background: {bg}, pose: {pose}, frame: {n}.")
+                    continue
 
-                left_coords_list.append(rel_left)
-                right_coords_list.append(rel_right)
+                rel_left = raw_arr_left - raw_arr_left[0]
+                rel_left[:, 0] /= range_x_left
+                rel_left[:, 1] /= range_y_left
+
+                rel_right = raw_arr_right - raw_arr_right[0]
+                rel_right[:, 0] /= range_x_right
+                rel_right[:, 1] /= range_y_right
+
+                features_left = np.concatenate([arr_left, rel_left], axis = 1)
+                features_right = np.concatenate([arr_right, rel_right], axis = 1) 
+
+                left_features_list.append(features_left)
+                right_features_list.append(features_right)
 
                 coords_3d = loadCoords(bg, pose, n)
                 generateTarget(coords_3d)
@@ -305,14 +327,14 @@ def createGraphDataset(mode):
             
         input_tensor, target = torch.load(path)
         
-        # input_tensor is now structured as shape (2, 21, 2)
+        # input_tensor is now structured as shape (2, 21, 4)
         # index 0 is left hand joint coordinate grid, index 1 is right hand
-        coords_left = input_tensor[0]   # Shape: (21, 2)
-        coords_right = input_tensor[1]  # Shape: (21, 2)
+        features_left = input_tensor[0]   # Shape: (21, 4)
+        features_right = input_tensor[1]  # Shape: (21, 4)
         
         # Wrap directly into PyTorch Geometric Data objects
-        left_graph = Data(x = coords_left, edge_index = hand_edge_index)
-        right_graph = Data(x = coords_right, edge_index = hand_edge_index)
+        left_graph = Data(x = features_left, edge_index = hand_edge_index)
+        right_graph = Data(x = features_right, edge_index = hand_edge_index)
         
         data_pt = (left_graph, right_graph, target)
         dataset.append(data_pt)

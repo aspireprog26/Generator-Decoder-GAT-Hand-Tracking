@@ -6,16 +6,17 @@ from torch_geometric.nn import GATConv, global_mean_pool
 class GraphAttentionNet(nn.Module):
     def __init__(self, input_size):
         super().__init__()
-        self.conv1 = GATConv(in_channels = input_size, out_channels = 16, heads = 4, dropout = 0.1)      # 4 attention heads * 16 out channels -> 64 out
-        self.conv2 = GATConv(in_channels = 64, out_channels = 64, heads = 1, dropout = 0.1)              # 1 attention head * 64 out channels -> 64 out
+        self.gat1 = GATConv(in_channels = input_size, out_channels = 16, heads = 4, dropout = 0.4)      # 4 attention heads * 16 out channels -> 64 out
+        #self.gat2 = GATConv(in_channels = 64, out_channels = 64, heads = 1, dropout = 0.4)              # 1 attention head * 64 out channels -> 64 out
         self.layer_norm = nn.LayerNorm(64)
         self.elu = nn.ELU()
 
-    def forward(self, coords, edge_index, batch):
-        coords = self.elu(self.layer_norm(self.conv1(coords, edge_index)))           
-        coords = self.conv2(coords, edge_index)
-        pooled_coords = global_mean_pool(coords, batch)                                                  # (B, N, 64) -> (B, 64)
-        return pooled_coords
+    def forward(self, features, edge_index, batch):
+        features = self.gat1(features, edge_index)          
+       # features = self.gat2(features, edge_index)
+        batch_size = batch.max().item() + 1
+        features = features.view(batch_size, -1)                                                          # (B, 21, 64) -> (B, 1344)
+        return features
     
 class Encoder(nn.Module):
     def __init__(self, input_size, output_size):
@@ -51,15 +52,15 @@ class Regressor(nn.Module):
     def __init__(self, input_size, output_size):
         super().__init__()
 
-        self.fc1 = nn.Linear(input_size, 128)
-        self.layer_norm1 = nn.LayerNorm(128)
-        self.dropout1 = nn.Dropout(p = 0.1)
+        self.fc1 = nn.Linear(input_size, 256)
+        self.layer_norm1 = nn.LayerNorm(256)
+        self.dropout1 = nn.Dropout(p = 0.4)
 
-        self.fc2 = nn.Linear(128, 256)
-        self.layer_norm2 = nn.LayerNorm(256)
-        self.dropout2 = nn.Dropout(p = 0.1)
+        self.fc2 = nn.Linear(256, 128)
+        self.layer_norm2 = nn.LayerNorm(128)
+        self.dropout2 = nn.Dropout(p = 0.4)
 
-        self.out = nn.Linear(256, output_size)
+        self.out = nn.Linear(128, output_size)
         
         self.gelu = nn.GELU()
         self.tanh = nn.Tanh()
@@ -80,8 +81,8 @@ class Regressor(nn.Module):
                 F.normalize(finger[:, 3:6], dim = -1),    # MCP vector
                 F.normalize(finger[:, 6:9], dim = -1),    # IP vector
                 F.normalize(finger[:, 9:12], dim = -1),   # TIP vector
-                self.tanh(finger[:, 12:15]),               # activations for dot product 
-                self.tanh(finger[:, 15:18]),              # activations for sign
+                finger[:, 12:15],                         # activations for dot product 
+                finger[:, 15:18],                         # activations for sign
                 finger[:, 18:20]                          # ratios left unchanged
             ]
             new_fingers.append(torch.cat(parts, dim = -1))
@@ -92,15 +93,15 @@ class Regressor(nn.Module):
 class AnatomyModel(nn.Module):
     def __init__(self, input_size, output_size):
         super().__init__()
-        self.gat = GraphAttentionNet(input_size)                                        # (B, 21, 2) -> (B, 64)
-        self.encoder = Encoder(64, 64)                                                  # (B, 64) -> (B, 64)
-        self.gated_fusion = GatedFusion(64, 64)                                         # (B, 64) -> (B, 64)
-        self.fusion_fc = nn.Linear(64, 64)                                              # (B, 64) -> (B, 64)
-        self.regressor = Regressor(64, output_size)                                     # (B, 64) -> (B, 100)
+        self.gat = GraphAttentionNet(input_size)                                        # (B, 21, 4) -> (B, 1344)
+        self.encoder = Encoder(1344, 1344)                                              # (B, 1344) -> (B, 1024)
+        self.gated_fusion = GatedFusion(1344, 1344)                                     # (B, 1024) -> (B, 1024)
+        self.fusion_fc = nn.Linear(1344, 512)                                          # (B, 1024) -> (B, 1024)
+        self.regressor = Regressor(512, output_size)                                   # (B, 1024) -> (B, 100)
 
-    def forward(self, coords_left, coords_right, edge_index_left, edge_index_right, batch_left, batch_right):
-        left_gat = self.gat(coords_left, edge_index_left, batch_left)                   # left hand joint graph embedding pooled vector
-        right_gat = self.gat(coords_right, edge_index_right, batch_right)               # right hand joint graph embedding pooled vector
+    def forward(self, features_left, features_right, edge_index_left, edge_index_right, batch_left, batch_right):
+        left_gat = self.gat(features_left, edge_index_left, batch_left)                 # left hand joint graph embedding pooled vector
+        right_gat = self.gat(features_right, edge_index_right, batch_right)             # right hand joint graph embedding pooled vector
         
         left_encoder = self.encoder(left_gat)                                           # latent left embedding
         right_encoder = self.encoder(right_gat)                                         # latent right embedding
