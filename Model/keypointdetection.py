@@ -19,6 +19,14 @@ HAND_SKELETON = [
     (0, 17), (17, 18), (18, 19), (19, 20)
 ]
 
+ANGLE_JOINTS = [
+    (1, 2, 3), (2, 3, 4),
+    (5, 6, 7), (6, 7, 8),
+    (9, 10, 11), (10, 11, 12),
+    (13, 14, 15), (14, 15, 16),
+    (17, 18, 19), (18, 19, 20)
+]
+
 class TRTEngine:
     def __init__(self, engine):
         self.engine_path = engine

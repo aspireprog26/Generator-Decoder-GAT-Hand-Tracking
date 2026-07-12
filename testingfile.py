@@ -7,12 +7,15 @@ from pathlib import Path
 import pycuda.driver as cuda
 import matplotlib.pyplot as plt
 
+import sys
+sys.path.insert(0, "C:\Users\Test\Documents\Hand-Tracking-2\Model")
+
+from Model.constrain import OptimizeHands
+
 # Hide the non-critical warnings to keep console clean
 warnings.filterwarnings("ignore")
 
 # Define the Hand Skeleton connections. Each tuple draws a line between keypoints A and B
-# The keypoints indices match the model's output ordering.
-
 HAND_SKELETON = [ 
     (0, 1), (1, 2), (2, 3), (3, 4),
     (0, 5), (5, 6), (6, 7), (7, 8),
@@ -294,7 +297,7 @@ class RTMPose:
             cv2.imwrite(str(self.vis_dir / out), vis)
             n += 1
         
-        return results
+        return [results, left, right]
     
 if __name__ == "__main__":
     # Hardcoded paths for this specific machine/project layout.
@@ -305,7 +308,8 @@ if __name__ == "__main__":
     pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
 
     # Warm up the GPU / TensorRT execution path before timing.
-    kps = pose.get_keypoints()
+    out = pose.get_keypoints()
+    kps = out[0]
     
     left_kps = kps[0]
     right_kps = kps[1]
@@ -341,15 +345,18 @@ if __name__ == "__main__":
     pts_right_rect = pts_right_rect.squeeze(1)
 
     # Obtain 4D points and scale to 3D
-
     points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
     points3D = (points4D[:3] / points4D[3]).T * 100
     points3D = np.squeeze(points3D)
+
+    hand_optimizer = OptimizeHands(points3D, out[0], out[1])
+    optimized_kps = hand_optimizer.optimize()
+    points3D = optimized_kps[2]
     print(points3D)
+    
     fig = plt.figure()
     ax = fig.add_subplot(111, projection = '3d')
     
-
     ax.zaxis.set_inverted(True)
     ax.view_init(elev = 20, azim = 50, roll = 0)   
     
@@ -357,7 +364,6 @@ if __name__ == "__main__":
     ax.set_ylabel('Y')
     ax.set_zlabel('Z') 
     
-
     ax.scatter(points3D[:, 0], points3D[:, 1], points3D[:, 2], color = (196 / 255, 12 / 255, 27 / 255), s = 15)
     for start, end in HAND_SKELETON:
         ax.plot(

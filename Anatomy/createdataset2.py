@@ -325,18 +325,18 @@ def createGraphDataset(mode):
         if path.name == "dataset.pt":
             continue
             
-        input_tensor, target = torch.load(path)
+        input_tensor, stereo_optim_left, stereo_optim_right, target = torch.load(path)
         
-        # input_tensor is now structured as shape (2, 21, 4)
+        # input_tensor is now structured as shape (2, 21, 3)
         # index 0 is left hand joint coordinate grid, index 1 is right hand
-        features_left = input_tensor[0]   # Shape: (21, 4)
-        features_right = input_tensor[1]  # Shape: (21, 4)
+        features_left = input_tensor[0]   # Shape: (21, 3)
+        features_right = input_tensor[1]  # Shape: (21, 3)
         
         # Wrap directly into PyTorch Geometric Data objects
         left_graph = Data(x = features_left, edge_index = hand_edge_index)
         right_graph = Data(x = features_right, edge_index = hand_edge_index)
         
-        data_pt = (left_graph, right_graph, target)
+        data_pt = (left_graph, right_graph, stereo_optim_left, stereo_optim_right, target)
         dataset.append(data_pt)
         
     torch.save(dataset, dir / "dataset.pt")

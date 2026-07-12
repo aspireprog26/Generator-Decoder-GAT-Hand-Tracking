@@ -22,7 +22,7 @@ class Trainer:
         for epoch in range(self.num_epochs):
             self.model.train()
             train_loss = 0
-            for left_batch, right_batch, target in self.train_loader:
+            for left_batch, right_batch, stereo_optim_left, stereo_optim_right, target in self.train_loader:
                 left_coords = left_batch.x
                 edge_left = left_batch.edge_index
                 batch_left = left_batch.batch
@@ -33,7 +33,7 @@ class Trainer:
 
                 self.optimizer.zero_grad()
                 output = self.model(left_coords, right_coords, edge_left, edge_right, batch_left, batch_right)
-                loss = self.criterion(output, target)
+                loss = self.criterion(output, target, stereo_optim_left, stereo_optim_right)
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item()
@@ -42,7 +42,7 @@ class Trainer:
             self.model.eval()
             val_loss = 0
             with torch.no_grad():
-                for left_batch, right_batch, target in self.val_loader:
+                for left_batch, right_batch, stereo_optim_left, stereo_optim_right, target in self.val_loader:
                     left_coords = left_batch.x
                     edge_left = left_batch.edge_index
                     batch_left = left_batch.batch
@@ -52,7 +52,7 @@ class Trainer:
                     batch_right = right_batch.batch
 
                     output = self.model(left_coords, right_coords, edge_left, edge_right, batch_left, batch_right)
-                    loss = self.criterion(output, target)
+                    loss = self.criterion(output, target, stereo_optim_left, stereo_optim_right)
                     val_loss += loss.item()
             val_loss /= len(self.val_loader)
 

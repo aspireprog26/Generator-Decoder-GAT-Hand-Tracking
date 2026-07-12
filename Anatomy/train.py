@@ -1,3 +1,4 @@
+import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,6 +8,9 @@ from trainer import Trainer
 from model import AnatomyModel
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
+
+sys.path.insert(0, "/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Model")
+from Model.optimize import Losses
 
 configs = {
     "lr": 1e-4,
@@ -23,49 +27,18 @@ configs = {
     "es_thresh": 1e-4,
     "drop_last": False
 }
-
-def unit_vec_loss(pred_vec, target_vec):
-    return 1.0 - F.cosine_similarity(pred_vec, target_vec, dim = -1).mean()
-
-def finger_block_loss(pred_f, target_f):
-    # 0:3   CMC unit vector
-    # 3:6   MCP unit vector
-    # 6:9   IP unit vector
-    # 9:12  TIP unit vector
-    # 12:15 dot products
-    # 15:18 sign values
-    # 18:20 ratios
-
-    vec_loss = (
-        unit_vec_loss(pred_f[:, 0:3], target_f[:, 0:3]) +
-        unit_vec_loss(pred_f[:, 3:6], target_f[:, 3:6]) +
-        unit_vec_loss(pred_f[:, 6:9], target_f[:, 6:9]) +
-        unit_vec_loss(pred_f[:, 9:12], target_f[:, 9:12])
-    ) / 4.0
-
-    dot_loss = F.smooth_l1_loss(pred_f[:, 12:15], target_f[:, 12:15])
-    sign_loss = F.smooth_l1_loss(pred_f[:, 15:18], target_f[:, 15:18])
-    ratio_loss = F.smooth_l1_loss(pred_f[:, 18:20], target_f[:, 18:20])
-
-    total_loss = vec_loss + dot_loss + sign_loss + 0.5 * ratio_loss
-    return total_loss
-
-def multiloss(pred, target):
-    pred_fingers = torch.chunk(pred, 5, dim=-1)
-    target_fingers = torch.chunk(target, 5, dim=-1)
-
-    losses = []
-    for pf, tf in zip(pred_fingers, target_fingers):
-        losses.append(finger_block_loss(pf, tf))
-
-    return sum(losses) / len(losses)
+ 
+def mulitloss(outputs):
+    Non
 
 def collate(batch):
-    left_graphs, right_graphs, targets = zip(*batch)
+    left_graphs, right_graphs, stereo_optim_left, stereo_optim_right, targets = zip(*batch)
     left_batch = Batch.from_data_list(list(left_graphs))
     right_batch = Batch.from_data_list(list(right_graphs))
-    target = torch.stack(targets, dim = 0).float()
-    return left_batch, right_batch, target
+    stereo_optim_left = torch.stack(stereo_optim_left, dim = 0).float()
+    stereo_optim_right = torch.stack(stereo_optim_right, dim = 0).float()
+    targets = torch.stack(targets, dim = 0).float()
+    return left_batch, right_batch, targets
 
 train_dataset = torch.load(Path(configs["data_dir"]) / "Training" / "dataset.pt")
 train_loader = DataLoader(
