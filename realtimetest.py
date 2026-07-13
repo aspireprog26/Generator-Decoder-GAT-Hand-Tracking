@@ -5,7 +5,7 @@ from pynput import keyboard
 from threading import Thread
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, r"/home/mrtcloud-1/Documents/Hand-Tracking-2/Model")
+sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Model")
 import keypointdetection as kp  # type: ignore
 
 CAM = 1

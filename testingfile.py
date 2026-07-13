@@ -8,7 +8,7 @@ import pycuda.driver as cuda
 import matplotlib.pyplot as plt
 
 import sys
-sys.path.insert(0, "C:\Users\Test\Documents\Hand-Tracking-2\Model")
+sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Model")
 
 from Model.constrain import OptimizeHands
 
@@ -336,11 +336,10 @@ if __name__ == "__main__":
     pts_left = np.asarray(pts_left, dtype = np.float32).reshape(-1,1,2)
     pts_right = np.asarray(pts_right, dtype = np.float32).reshape(-1,1,2)
 
-    print(pts_left.shape)
     pts_left_rect = cv2.undistortPoints(pts_left, K1, dist1, R = R1, P = P1)
     pts_right_rect = cv2.undistortPoints(pts_right, K2, dist2, R = R2, P = P2)
 
-        # Flatten back to (N, 2)
+    # Flatten back to (N, 2)
     pts_left_rect = pts_left_rect.squeeze(1)
     pts_right_rect = pts_right_rect.squeeze(1)
 
@@ -348,17 +347,16 @@ if __name__ == "__main__":
     points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
     points3D = (points4D[:3] / points4D[3]).T * 100
     points3D = np.squeeze(points3D)
-
-    hand_optimizer = OptimizeHands(points3D, out[0], out[1])
+    hand_optimizer = OptimizeHands(points3D, out[1], out[2])
     optimized_kps = hand_optimizer.optimize()
-    points3D = optimized_kps[2]
+    points3D = (optimized_kps[0] + optimized_kps[1]) / 2
     print(points3D)
     
     fig = plt.figure()
     ax = fig.add_subplot(111, projection = '3d')
     
     ax.zaxis.set_inverted(True)
-    ax.view_init(elev = 20, azim = 50, roll = 0)   
+    ax.view_init(elev = 20, azim = 75, roll = 0)   
     
     ax.set_xlabel('X')
     ax.set_ylabel('Y')

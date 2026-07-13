@@ -14,8 +14,7 @@ class Constrain:
     def mp_keypoints(self):
         self.mp_hands = mp.solutions.hands
         hands = self.mp_hands.Hands(static_image_mode = True, max_num_hands = 1, min_detection_confidence = self.conf)
-        image = cv2.imread(self.img)
-        img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        img_rgb = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
         results = hands.process(img_rgb)
 
         if results.multi_hand_landmarks:
@@ -33,9 +32,9 @@ class Constrain:
 
 class OptimizeHands:
     def __init__(self, stereo_coords: np.ndarray, left_hand: str, right_hand: str):
-        w1 = 0.4
-        w2 = 0.2
-        w3 = 0.4
+        w1 = 0.35
+        w2 = 0.3
+        w3 = 0.35
         lr = 1e-2
         conf = 0.2
         num_steps = 100

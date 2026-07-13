@@ -275,7 +275,7 @@ class RTMPose:
             
             # Scale coordinates back to original image size
             h, w = image.shape[:2]      # Only takes height and width, ignores RGB channel
-            scaled_coords = self.orig_scale(coords, 256, 256)
+            scaled_coords = self.orig_scale(coords, w, h)
 
             kp_coords = {}
             for i in range(scaled_coords.shape[0]):
