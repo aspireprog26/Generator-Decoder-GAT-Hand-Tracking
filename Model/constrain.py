@@ -1,7 +1,9 @@
+import os
 import cv2
+import time
+import platform
 import numpy as np
 import mediapipe as mp 
-from pathlib import Path
 from optimize import Optimizer
 
 class Constrain:
@@ -9,13 +11,17 @@ class Constrain:
         self.img = img
         self.conf = mp_conf
         self.hand_detected = False
+        
         self.mp_keypoints()
     
     def mp_keypoints(self):
         self.mp_hands = mp.solutions.hands
-        hands = self.mp_hands.Hands(static_image_mode = True, max_num_hands = 1, min_detection_confidence = self.conf)
+        hands = self.mp_hands.Hands(static_image_mode = False, max_num_hands = 1, min_detection_confidence = self.conf)
         img_rgb = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
         results = hands.process(img_rgb)
+
+        # Clear non-harmful MediaPipe warnings from terminal.
+        os.system("cls" if platform.system() == "Windows" else "clear")
 
         if results.multi_hand_landmarks:
             self.hand_detected = True

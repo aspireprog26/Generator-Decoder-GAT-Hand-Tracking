@@ -347,11 +347,12 @@ if __name__ == "__main__":
     points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
     points3D = (points4D[:3] / points4D[3]).T * 100
     points3D = np.squeeze(points3D)
+    
     hand_optimizer = OptimizeHands(points3D, out[1], out[2])
     optimized_kps = hand_optimizer.optimize()
     points3D = (optimized_kps[0] + optimized_kps[1]) / 2
     print(points3D)
-    
+        
     fig = plt.figure()
     ax = fig.add_subplot(111, projection = '3d')
     
