@@ -29,7 +29,7 @@ configs = {
 }
  
 def mulitloss(outputs):
-    Non
+    None
 
 def collate(batch):
     left_graphs, right_graphs, stereo_optim_left, stereo_optim_right, targets = zip(*batch)

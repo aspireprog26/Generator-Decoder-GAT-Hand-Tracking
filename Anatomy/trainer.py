@@ -22,18 +22,15 @@ class Trainer:
         for epoch in range(self.num_epochs):
             self.model.train()
             train_loss = 0
-            for left_batch, right_batch, stereo_optim_left, stereo_optim_right, target in self.train_loader:
-                left_coords = left_batch.x
-                edge_left = left_batch.edge_index
-                batch_left = left_batch.batch
-
-                right_coords = right_batch.x
-                edge_right = right_batch.edge_index
-                batch_right = right_batch.batch
+            for batch, target in self.train_loader:
+                features = batch.x
+                edge_index = batch.edge_index
+                b = batch.batch
 
                 self.optimizer.zero_grad()
-                output = self.model(left_coords, right_coords, edge_left, edge_right, batch_left, batch_right)
-                loss = self.criterion(output, target, stereo_optim_left, stereo_optim_right)
+                output = self.model(features, edge_index, b)
+                loss = self.criterion(output, target, features)
+                
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item()
@@ -42,17 +39,13 @@ class Trainer:
             self.model.eval()
             val_loss = 0
             with torch.no_grad():
-                for left_batch, right_batch, stereo_optim_left, stereo_optim_right, target in self.val_loader:
-                    left_coords = left_batch.x
-                    edge_left = left_batch.edge_index
-                    batch_left = left_batch.batch
+                for batch, target in self.val_loader:
+                    features = batch.x
+                    edge_index = batch.edge_index
+                    b = batch.batch
 
-                    right_coords = right_batch.x
-                    edge_right = right_batch.edge_index
-                    batch_right = right_batch.batch
-
-                    output = self.model(left_coords, right_coords, edge_left, edge_right, batch_left, batch_right)
-                    loss = self.criterion(output, target, stereo_optim_left, stereo_optim_right)
+                    output = self.model(features, edge_index, b)
+                    loss = self.criterion(output, target, features)
                     val_loss += loss.item()
             val_loss /= len(self.val_loader)
 
