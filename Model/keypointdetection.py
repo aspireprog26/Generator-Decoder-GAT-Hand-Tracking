@@ -1,6 +1,7 @@
 import cv2
 import warnings 
 import numpy as np
+import mediapipe as mp
 import pycuda.autoinit      # Initializes cuda when imported
 import tensorrt as trt
 import pycuda.driver as cuda
@@ -227,7 +228,6 @@ class RTMPose:
 
     def draw_hand(self, img_bgr, coords, scores):
         vis = img_bgr.copy()
-
         # Draw the bones first so the keypoint circles appear on top
         for a, b in HAND_SKELETON:
             if a in coords and b in coords:
@@ -285,3 +285,46 @@ class RTMPose:
             score.append(scores)
 
         return results, score 
+
+class MediaPipe:
+    def __init__(self):
+        self.mp_hands = mp.solutions.hands
+        self.mp_draw = mp.solutions.drawing_utils
+        
+        self.hands = self.mp_hands.Hands(
+            static_image_mode = False,
+            max_num_hands = 1,
+            min_detection_confidence = 0.4,
+        )
+
+    def get_keypoints(self, frame):
+        kps = np.zeros((21, 2), dtype = np.float32)
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(rgb_frame)
+
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                h, w, _ = frame.shape
+                for idx, lm in enumerate(hand_landmarks.landmark):
+                    px, py = int(lm.x * w), int(lm.y * h)
+                    kps[idx] = [px, py]
+        return kps
+    
+    def draw_hand(self, coords, frame):
+        frame = frame.copy()
+        for a, b in HAND_SKELETON:
+            p1 = coords[a]
+            p2 = coords[b]
+
+            pt1 = (int(round(p1[0])), int(round(p1[1])))
+            pt2 = (int(round(p2[0])), int(round(p2[1])))
+            cv2.line(frame, pt1, pt2, (12, 27, 196), 2)      # Color the lines of the keypoint skeleton
+        
+        for i in range(21):
+            x = coords[i][0]
+            y = coords[i][1]
+            center = (int(round(x)), int(round(y)))
+            cv2.circle(frame, center, 5, (0, 0, 255), -1)         # Inner circle
+            cv2.circle(frame, center, 5, (0, 0, 0), 1)      # Border circle  
+        
+        return frame
