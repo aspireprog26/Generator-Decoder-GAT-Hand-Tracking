@@ -1,13 +1,11 @@
 import torch.nn as nn
 from torch_geometric.nn import GATConv
 
-dropout = 0.2
-
 class GraphAttentionNet(nn.Module):
-    def __init__(self, input_size):
+    def __init__(self, input_size, hidden_size, dropout):
         super().__init__()
-        hidden_size = 8 * 8  # attention heads * out channels 
-        self.gat1 = GATConv(in_channels = input_size, out_channels = 8, heads = 8, dropout = dropout)                      
+        out_channels_1 = hidden_size / 8
+        self.gat1 = GATConv(in_channels = input_size, out_channels = out_channels_1, heads = 8, dropout = dropout)                      
         self.gat2 = GATConv(in_channels = hidden_size, out_channels = hidden_size, heads = 1, dropout = dropout)             
         self.layer_norm = nn.LayerNorm(hidden_size)
         self.elu = nn.ELU()
@@ -19,10 +17,10 @@ class GraphAttentionNet(nn.Module):
         batch_size = batch.max().item() + 1
         features = features.view(batch_size, -1)                                                         # (B, 21, 64) -> (B, 1344)
         out = self.out(features)                                                                         # (B, 1344) -> (B, 672)
-        return features
+        return out
     
 class Regressor(nn.Module):
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, output_size, dropout):
         super().__init__()
 
         hidden1 = 512
@@ -58,10 +56,10 @@ class Regressor(nn.Module):
         return out
     
 class AnatomyModel(nn.Module):
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, hidden_size, output_size, dropout):
         super().__init__()
-        self.gat = GraphAttentionNet(input_size)                                        # (B, 21, 3) -> (B, 1344)
-        self.regressor = Regressor(1344, output_size)                                   # (B, 1344) -> (B, 3)
+        self.gat = GraphAttentionNet(input_size, hidden_size, dropout)                           # (B, 21, 3) -> (B, 1344)
+        self.regressor = Regressor(1344, output_size, dropout)                                   # (B, 1344) -> (B, 3)
 
     def forward(self, features, edge_index, batch):
         gat = self.gat(features, edge_index, batch)                       
