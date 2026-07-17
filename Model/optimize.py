@@ -41,12 +41,19 @@ class Losses:
             cos_target = F.cosine_similarity(t1, t2, dim = -1)
             loss += ((cos_stereo - cos_target) ** 2)
         return loss / len(self.angles)
+
+    def hand_point_loss(self, stereo_aligned, target):
+        hand = list(range(21))
+
+        diff = stereo_aligned[hand] - target[hand]
+        return (diff ** 2).sum(dim = -1).mean()
     
 class Optimizer:
-    def __init__(self, w1: float, w2: float, w3: float, lr: float, num_steps: int):
+    def __init__(self, w1: float, w2: float, w3: float, w4: float, lr: float, num_steps: int):
         self.w1 = w1
         self.w2 = w2
         self.w3 = w3
+        self.w4 = w4
         self.lr = lr
         self.num_steps = num_steps
 
@@ -104,7 +111,8 @@ class Optimizer:
             bone_dir_loss = self.losses.bone_dir_loss(coords, target)
             bone_length_loss = self.losses.bone_length_loss(coords, target)
             bone_angle_loss = self.losses.angle_loss(coords, target)
-            loss = (self.w1 * bone_dir_loss) + (self.w2 * bone_length_loss) + (self.w3 * bone_angle_loss)
+            hand_loss = self.losses.thumb_point_loss(coords, target)
+            loss = (self.w1 * bone_dir_loss) + (self.w2 * bone_length_loss) + (self.w3 * bone_angle_loss) + (self.w4 * hand_loss) 
             loss.backward()
             optimizer.step()
 

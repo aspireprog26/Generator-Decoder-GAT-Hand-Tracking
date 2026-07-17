@@ -9,8 +9,9 @@ import matplotlib.pyplot as plt
 
 import sys
 sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Model")
+from keypointdetection import MediaPipe
 
-from Model.constrain import OptimizeHands
+from constrain import OptimizeHands
 
 # Hide the non-critical warnings to keep console clean
 warnings.filterwarnings("ignore")
@@ -298,30 +299,25 @@ class RTMPose:
             n += 1
         
         return [results, left, right]
-    
+
 if __name__ == "__main__":
-    # Hardcoded paths for this specific machine/project layout.
-    ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
-    FRAME_DIR = r"C:\Users\Test\Documents\Hand-Tracking-2\VideoTracking"
+    pose = MediaPipe()
+    image = cv2.imread(r"VideoTracking/FrameIn/img.jpg")
+    h, w = image.shape[:2]
+    half = w // 2
 
-    # Create the model wrapper.
-    pose = RTMPose(engine = ENGINE, frame_dir = FRAME_DIR)
+    left  = image[:, :half]
+    right = image[:, half:]
+    frames = [left, right]  
 
-    # Warm up the GPU / TensorRT execution path before timing.
-    out = pose.get_keypoints()
-    kps = out[0]
-    
-    left_kps = kps[0]
-    right_kps = kps[1]
+    left_kps = pose.get_keypoints(left)
+    right_kps = pose.get_keypoints(right)
+    kps = [left_kps, right_kps]
+    for i in range(2):
+        out = Path(r"C:\Users\Test\Documents\Hand-Tracking-2\VideoTracking\FrameOut") / f"{i}.jpg"
+        vis = pose.draw_hand(kps[i], frames[i])
+        cv2.imwrite(out, vis)
 
-    pts_left = []
-    pts_right = []
-
-    for i in range(21):
-        pts_left.append(left_kps[i])
-        pts_right.append(right_kps[i])
-
-    # Load calibrated camera features
     fs = cv2.FileStorage(r"C:\Users\Test\Documents\Hand-Tracking-2\Stereo\stereo.yml", cv2.FILE_STORAGE_READ)
     P1 = fs.getNode("P1").mat()
     P2 = fs.getNode("P2").mat()
@@ -333,8 +329,8 @@ if __name__ == "__main__":
     dist2 = fs.getNode("dist2").mat()
     fs.release()
 
-    pts_left = np.asarray(pts_left, dtype = np.float32).reshape(-1,1,2)
-    pts_right = np.asarray(pts_right, dtype = np.float32).reshape(-1,1,2)
+    pts_left = np.asarray(left_kps, dtype = np.float32).reshape(-1,1,2)
+    pts_right = np.asarray(right_kps, dtype = np.float32).reshape(-1,1,2)
 
     pts_left_rect = cv2.undistortPoints(pts_left, K1, dist1, R = R1, P = P1)
     pts_right_rect = cv2.undistortPoints(pts_right, K2, dist2, R = R2, P = P2)
@@ -348,16 +344,16 @@ if __name__ == "__main__":
     points3D = (points4D[:3] / points4D[3]).T * 100
     points3D = np.squeeze(points3D)
     
-    hand_optimizer = OptimizeHands(points3D, out[1], out[2])
+    hand_optimizer = OptimizeHands(points3D, left, right)
     optimized_kps = hand_optimizer.optimize()
     points3D = (optimized_kps[0] + optimized_kps[1]) / 2
+    #points3D = (optimized_kps[2] + optimized_kps[2]) / 2
     print(points3D)
-        
     fig = plt.figure()
     ax = fig.add_subplot(111, projection = '3d')
     
     ax.zaxis.set_inverted(True)
-    ax.view_init(elev = 20, azim = 75, roll = 0)   
+    ax.view_init(elev = 220, azim = 130, roll = 0)   
     
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
