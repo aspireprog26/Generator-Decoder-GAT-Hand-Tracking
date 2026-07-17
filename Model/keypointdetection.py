@@ -1,13 +1,17 @@
 import cv2
-import warnings 
 import numpy as np
 import mediapipe as mp
-import pycuda.autoinit      # Initializes cuda when imported
+
+"""
+Use for RTMPose implementation:
+import warnings
+import pycuda.autoinit       
 import tensorrt as trt
 import pycuda.driver as cuda
 
-# Hide the non-critical warnings to keep console clean
+Hide the non-critical warnings to keep console clean:
 warnings.filterwarnings("ignore")
+"""
 
 # Define the Hand Skeleton connections. Each tuple draws a line between keypoints A and B
 # The keypoints indices match the model's output ordering.
@@ -28,6 +32,7 @@ ANGLE_JOINTS = [
     (17, 18, 19), (18, 19, 20)
 ]
 
+"""
 class TRTEngine:
     def __init__(self, engine):
         self.engine_path = engine
@@ -153,13 +158,13 @@ class RTMPose:
         return img
     
     def decode_outputs(self, outputs):
-        """
-        RTMPose exports take different output forms depending on model export
-        Supported Forms:
-        1) One Output: (B, K, 2) or (B, K, 3) -> Direct Coordinates
-        2) One Output: (B, K, H, W) -> Heatmaps
-        3) Two Outputs: (B, K, L) -> SimCC-style x,y distributions
-        """
+        
+       # RTMPose exports take different output forms depending on model export
+       # Supported Forms:
+       # 1) One Output: (B, K, 2) or (B, K, 3) -> Direct Coordinates
+       # 2) One Output: (B, K, H, W) -> Heatmaps
+       # 3) Two Outputs: (B, K, L) -> SimCC-style x,y distributions
+
 
         if len(outputs) == 1:
             out = outputs[0]
@@ -285,6 +290,7 @@ class RTMPose:
             score.append(scores)
 
         return results, score 
+"""
 
 class MediaPipe:
     def __init__(self):
@@ -294,7 +300,7 @@ class MediaPipe:
         self.hands = self.mp_hands.Hands(
             static_image_mode = False,
             max_num_hands = 1,
-            min_detection_confidence = 0.4,
+            min_detection_confidence = 0.3,
         )
 
     def get_keypoints(self, frame):

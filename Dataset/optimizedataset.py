@@ -1,24 +1,23 @@
+import os
 import sys
 import cv2
-import os
 import numpy as np
 from pathlib import Path
 
-sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Model")
+sys.path.insert(0, "/home/mrtcloud-1/Documents/Hand-Tracking-2/Model")
 
 import keypointdetection as kp  # type: ignore
 from constrain import OptimizeHands
 
-ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
 class DatasetOptimizer:
     def __init__(self):
         self.pose = kp.MediaPipe()
-        self.data_dir = Path(r"C:\Users\Test\Documents\StereoDataset")
+        self.data_dir = Path("/home/mrtcloud-1/Documents/StereoDataset")
         self.types = ["Clean", "Noisy"]
         self.openCalibration()
     
     def openCalibration(self):
-        fs = cv2.FileStorage(r"C:\Users\Test\Documents\Hand-Tracking-2\Stereo\stereo.yml", cv2.FILE_STORAGE_READ)
+        fs = cv2.FileStorage("/home/mrtcloud-1/Documents/Hand-Tracking-2/Stereo/stereo.yml", cv2.FILE_STORAGE_READ)
         self.P1 = fs.getNode("P1").mat()
         self.P2 = fs.getNode("P2").mat()
         self.K1 = fs.getNode("K1").mat()
@@ -51,7 +50,7 @@ class DatasetOptimizer:
         print("Starting Optimization Process.")
         count = 0
         for img_type in self.types:
-            for img in (self.data_dir / type).glob("*.jpg"):
+            for img in (self.data_dir / img_type).glob("*.jpg"):
                 try:
                     image = cv2.imread(img, cv2.IMREAD_COLOR)
                     if image is None:
@@ -96,5 +95,5 @@ class DatasetOptimizer:
                 os.remove(save_path)
 
 optimizer = DatasetOptimizer()
-#optimizer.optimize()
+optimizer.optimize()
 #optimizer.remove_old()

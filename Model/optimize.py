@@ -43,11 +43,31 @@ class Losses:
         return loss / len(self.angles)
 
     def hand_point_loss(self, stereo_aligned, target):
-        hand = list(range(21))
+        weights = torch.ones(21, device = stereo_aligned.device)
 
-        diff = stereo_aligned[hand] - target[hand]
-        return (diff ** 2).sum(dim = -1).mean()
-    
+        # Wrist/palm joints
+        weights[[0, 5, 9, 13, 17]] = 1
+
+        # Thumb joints
+        weights[[1, 2, 3, 4]] = 5
+
+        # Index finger
+        weights[[5, 6, 7, 8]] = 2
+
+        # Middle finger
+        weights[[9, 10, 11, 12]] = 5
+
+        # Ring finger
+        weights[[13, 14, 15, 16]] = 1
+
+        # Pinky
+        weights[[17, 18, 19, 20]] = 1
+
+        diff = stereo_aligned - target
+        error = (diff ** 2).sum(dim = -1)
+        weighted_error = (error * weights).sum() 
+
+        return weighted_error / weights.sum()
 class Optimizer:
     def __init__(self, w1: float, w2: float, w3: float, w4: float, lr: float, num_steps: int):
         self.w1 = w1
@@ -111,7 +131,7 @@ class Optimizer:
             bone_dir_loss = self.losses.bone_dir_loss(coords, target)
             bone_length_loss = self.losses.bone_length_loss(coords, target)
             bone_angle_loss = self.losses.angle_loss(coords, target)
-            hand_loss = self.losses.thumb_point_loss(coords, target)
+            hand_loss = self.losses.hand_point_loss(coords, target)
             loss = (self.w1 * bone_dir_loss) + (self.w2 * bone_length_loss) + (self.w3 * bone_angle_loss) + (self.w4 * hand_loss) 
             loss.backward()
             optimizer.step()
