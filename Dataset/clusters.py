@@ -5,6 +5,7 @@ import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from optimizedataset import DatasetOptimizer
 
 class Clusters:
@@ -14,8 +15,8 @@ class Clusters:
         self.types = ["Clean", "Noisy"]
 
         self.clusterer = hdbscan.HDBSCAN(
-            min_cluster_size = 10,
-            min_samples = 1,
+            min_cluster_size = 8,
+            min_samples = 2,
             prediction_data = True
         )
 
@@ -34,10 +35,12 @@ class Clusters:
 
     def createClusters(self):
         data = self.loadData()
+        data = StandardScaler().fit_transform(data)
         self.clusterer.fit(data)
 
         labels = self.clusterer.labels_
         print(labels.max())
+        print(np.count_nonzero(labels == -1))
         data_2d = PCA(n_components = 2).fit_transform(data)
         plt.scatter(
             data_2d[:, 0],
