@@ -62,12 +62,14 @@ if __name__ == "__main__":
     points3D = (points4D[:3] / points4D[3]).T * 100
     points3D = np.squeeze(points3D)
     
-    hand_optimizer = OptimizeHands(points3D, left, right)
-    optimized_kps = hand_optimizer.optimize()
-    points3D = (optimized_kps[0] + optimized_kps[1]) / 2
-   # points3D = np.load("/home/mrtcloud-1/Documents/StereoDataset/Clean/4729.npy")[0]
+ #   hand_optimizer = OptimizeHands(points3D, left, right)
+   # optimized_kps = hand_optimizer.optimize()
+   
+    #points3D = (optimized_kps[0] + optimized_kps[1]) / 2
+    points3D = np.load("/home/mrtcloud-1/Documents/StereoDataset/Clean/0000.npy")[1]
    # points3D = (optimized_kps[2] + optimized_kps[2]) / 2
     print(points3D)
+
     fig = plt.figure()
     ax = fig.add_subplot(111, projection = '3d')
     

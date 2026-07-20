@@ -1,9 +1,10 @@
 import os
 import sys
 import cv2
+import torch
 import numpy as np
 from pathlib import Path
-
+from scipy.io import loadmat
 sys.path.insert(0, "/home/mrtcloud-1/Documents/Hand-Tracking-2/Model")
 
 import keypointdetection as kp  # type: ignore
@@ -13,8 +14,13 @@ class DatasetOptimizer:
     def __init__(self):
         self.pose = kp.MediaPipe()
         self.data_dir = Path("/home/mrtcloud-1/Documents/StereoDataset")
+        self.stb_dir = Path("/home/mrtcloud-1/Documents/StereoSTBDataset/")
+        self.label_dir = self.stb_dir / "labels"
+        
         self.types = ["Clean", "Noisy"]
-        self.openCalibration()
+        self.poses = ["Counting", "Random"]
+
+        self.bg_count = 6
     
     def openCalibration(self):
         fs = cv2.FileStorage("/home/mrtcloud-1/Documents/Hand-Tracking-2/Stereo/stereo.yml", cv2.FILE_STORAGE_READ)
@@ -47,7 +53,9 @@ class DatasetOptimizer:
         return points3D
     
     def optimize(self):
+        self.openCalibration()
         print("Starting Optimization Process.")
+
         count = 0
         for img_type in self.types:
             for img in (self.data_dir / img_type).glob("*.jpg"):
@@ -88,7 +96,122 @@ class DatasetOptimizer:
                     continue
         print("Dataset Optimization Complete.")
 
-    def remove_old(self):
+    def loadCoords(self, bg, pose, frame):
+        dir = self.label_dir / f"B{bg}{pose}_BB.mat"
+        coords = loadmat(dir)["handPara"]
+        coords_transposed = np.transpose(coords, (2, 1, 0))     # Turns into shape (1500, 21, 3)
+        return coords_transposed[frame, ...]                    # Returns shape (21, 3)
+    
+    def getFeatures(self, coords: np.ndarray, noise: None):
+        # Can be used for STB in training loop or for the stereo dataset normalization
+        scale = np.linalg.norm(coords[9] - coords[0])
+        coords_proj = (coords - (scale * noise)) if noise is not None else coords
+        scale = np.linalg.norm(coords_proj[9] - coords_proj[0])
+        
+        coords_proj_norm = (coords_proj - coords_proj[0]) / scale
+
+        wrist_unit = coords_proj[0] / np.linalg.norm(coords_proj[0])
+        wrist_node_length = 0
+        wrist_vec = np.append(wrist_unit, wrist_node_length)
+
+        coords_normalized = coords_proj_norm.tolist()
+        coords_normalized[0].extend(wrist_vec.tolist())
+
+        for finger in range(5):
+            MCP = 1 + 4 * finger
+            PIP = 2 + 4 * finger
+            DIP = 3 + 4 * finger
+            TIP = 4 + 4 * finger
+
+            mcp_unit = coords_proj[MCP] / np.linalg.norm(coords_proj[MCP])
+            mcp_node_length = (np.linalg.norm(coords_proj[PIP] - coords_proj[MCP]) / scale)
+            mcp_vec = np.append(mcp_unit, mcp_node_length)
+
+            pip_unit = coords_proj[PIP] / np.linalg.norm(coords_proj[PIP])
+            pip_node_length = (np.linalg.norm(coords_proj[DIP] - coords_proj[PIP]) / scale)
+            pip_vec = np.append(pip_unit, pip_node_length)
+            
+            dip_unit = coords_proj[DIP] / np.linalg.norm(coords_proj[DIP])
+            dip_node_length = (np.linalg.norm(coords_proj[TIP] - coords_proj[DIP]) / scale)
+            dip_vec = np.append(dip_unit, dip_node_length)
+
+            tip_unit = coords_proj[TIP] / np.linalg.norm(coords_proj[TIP])
+            tip_node_length = 0
+            tip_vec = np.append(tip_unit, tip_node_length)
+
+            coords_normalized[MCP].extend(mcp_vec.tolist())
+            coords_normalized[PIP].extend(pip_vec.tolist())
+            coords_normalized[DIP].extend(dip_vec.tolist())
+            coords_normalized[TIP].extend(tip_vec.tolist())
+            
+        features = np.array(coords_normalized)
+        return features, coords_proj, scale
+
+    def saveSTB(self, start, end, path):
+        count = 0
+        for bg in range(start, end):
+            for pose in self.poses:
+                for n in range(0, 1500):
+                    coords = torch.tensor(self.loadCoords(bg, pose, n))
+                    torch.save(coords, path / f'{count}.pt')
+                    count += 1 
+
+    def stereoSave(self):
+        count = 0 
+        for img_type in self.types:
+            for pt in (self.data_dir / img_type).glob("*.npy"):
+                coords_proj, coords_optim = np.load(pt)
+                scale_opt = np.linalg.norm(coords_optim[9] - coords_optim[0])
+                error = (coords_optim - coords_proj) / scale_opt
+                normalized_coords = self.getFeatures(coords_proj, None)[0]
+                data = (torch.tensor(coords_proj), torch.tensor(normalized_coords), torch.tensor(coords_optim), torch.tensor(error))
+                torch.save(data, (self.data_dir / f'{img_type}Normalized' / f'{count}.pt'))
+                count += 1
+    
+    def createTrainTestVal(self):
+        clean_len = 3548
+        noisy_len = 2680
+
+        clean_train_end = int(clean_len * 0.7)
+        clean_val_end = int(clean_len * 0.85)
+
+        noisy_train_end = int(noisy_len * 0.7)
+        noisy_val_end = int(noisy_len * 0.85)
+
+        glob_count = 0
+        for img_type in self.types:
+            count = 0
+            train_end = clean_train_end if img_type == "Clean" else noisy_train_end
+            val_end = clean_val_end if img_type == "Noisy" else noisy_val_end
+
+            for pt in (self.data_dir / f'{img_type}Normalized').glob("*.pt"):
+                coords_proj, normalized_coords, coords_optim, error = torch.load(pt)
+                data = (coords_proj, normalized_coords, coords_optim)
+
+                if count < train_end:
+                    save_dir = self.data_dir / "Training"
+                elif count < val_end:
+                    save_dir = self.data_dir / "Validation"
+                else:
+                    save_dir = self.data_dir / "Testing"
+
+                torch.save(data, (save_dir / f'{glob_count}.pt'))
+                count += 1
+                glob_count += 1
+
+    def saveData(self): 
+        print("Starting STB Dataset.")
+        self.saveSTB(1, 5, self.stb_dir / "Training")
+        self.saveSTB(5, 6, self.stb_dir / "Validation")
+        self.saveSTB(6, 7, self.stb_dir / "Testing")
+        print("STB Dataset Complete.")
+
+        print("\nStarting Stereo Dataset.")
+        self.stereoSave()
+        self.createTrainTestVal()
+        print("Stereo Dataset Complete.")
+    
+    def removeOld(self):
         for type in self.types:
             for img in (self.data_dir / type).glob("*.npy"):
                 save_path = self.data_dir / type / f"{img.stem}.npy"
@@ -96,4 +219,5 @@ class DatasetOptimizer:
 
 optimizer = DatasetOptimizer()
 optimizer.optimize()
-#optimizer.remove_old()
+optimizer.removeOld()
+optimizer.saveData()
