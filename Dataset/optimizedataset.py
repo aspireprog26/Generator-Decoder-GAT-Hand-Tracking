@@ -217,7 +217,7 @@ class DatasetOptimizer:
                 save_path = self.data_dir / type / f"{img.stem}.npy"
                 os.remove(save_path)
 
-optimizer = DatasetOptimizer()
-optimizer.optimize()
-optimizer.removeOld()
-optimizer.saveData()
+#optimizer = DatasetOptimizer()
+#optimizer.optimize()
+#optimizer.removeOld()
+#optimizer.saveData()
