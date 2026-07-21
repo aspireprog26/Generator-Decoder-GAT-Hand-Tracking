@@ -5,6 +5,7 @@ class GraphAttentionNet(nn.Module):
     def __init__(self, input_size, hidden_size, dropout):
         super().__init__()
         out_channels_1 = hidden_size / 8
+
         self.gat1 = GATConv(in_channels = input_size, out_channels = out_channels_1, heads = 8, dropout = dropout)                      
         self.gat2 = GATConv(in_channels = hidden_size, out_channels = hidden_size, heads = 1, dropout = dropout)             
         self.layer_norm = nn.LayerNorm(hidden_size)
@@ -22,7 +23,6 @@ class GraphAttentionNet(nn.Module):
 class Regressor(nn.Module):
     def __init__(self, input_size, output_size, dropout):
         super().__init__()
-
         hidden1 = 512
 
         self.fc1 = nn.Linear(input_size, hidden1)

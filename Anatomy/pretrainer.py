@@ -1,10 +1,13 @@
-import optuna
 import torch
+import optuna
+import joblib
+import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
 import earlystopper as es
 from torch.utils.data import DataLoader
+
 class Trainer:
     def __init__(self, model: nn.Module, configs: dict, train_loader: DataLoader, val_loader: DataLoader, criterion: nn, optimizer: optim, scheduler):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -22,8 +25,24 @@ class Trainer:
         patience = configs["es_patience"]
 
         model_save_path = Path(configs["model_dir"]) / configs["model_name"]
-        self.early_stopper = es.EarlyStopping(patience, min_delta, model_save_path)
+        self.cluster_dir = configs["post_data_dir"] / "Clusters"
 
+        self.early_stopper = es.EarlyStopping(patience, min_delta, model_save_path)
+        self.clusterer = joblib.load(configs["post_data_dir"] / "Clusters" / "poseclusterer.joblib")
+        
+        self.chol_row = np.load(self.cluster_dir / "cholrow.npy")
+        self.chol_col = np.load(self.cluster_dir / "cholcol.npy")
+
+    def generateErrors(self, labels):
+        errors = []
+        for label in labels.tolist():
+            mean_mat = self.cluster_dir / f'meanmat{label}.npy'
+            Z = np.random.randn(*mean_mat.shape)
+            sample = mean_mat + self.chol_row @ Z @ self.chol_col.T
+            errors.append(sample)
+        
+        return torch.stack(errors, dim = 0)
+    
     def train(self, trial = None):
         for epoch in range(self.num_epochs):
             self.model.train()

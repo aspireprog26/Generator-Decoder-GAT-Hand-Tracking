@@ -1,30 +1,28 @@
+import json
 import torch
-import warnings
 import numpy as np
 import torch.nn as nn
-from train import configs
 from pathlib import Path
-from model import AnatomyRegression
-from dataset import StereoHandDataset
+from model import AnatomyModel
 from torch.utils.data import DataLoader
 
-warnings.filterwarnings("ignore", message = "TypedStorage is deprecated")
-
+with open("/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Anatomy/configs.json", "r") as f:
+    configs = json.load(f)
+    
 def nmse(target, prediction):
     return np.mean((target - prediction) ** 2) / np.var(target)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = AnatomyRegression(configs["input_size"], configs["hidden_size"], configs["output_size"]).to(device)
+model = AnatomyModel(configs["input_size"], configs["hidden_size"], configs["output_size"], configs["dropout"]).to(device)
 weights = torch.load((Path(configs["model_dir"]) / configs["model_name"]), weights_only = True, map_location = device)
 model.load_state_dict(weights)
 model.eval()
 
-dataset = StereoHandDataset(configs["data_dir"], "val")
+dataset = torch.load(Path(configs["data_dir"]) / "Testing" / "dataset.pt")
 loader = DataLoader(
     dataset = dataset,
     num_workers = configs["num_workers"],
     batch_size = configs["batch_size"],
-    shuffle = True
 )
 
 def evalModel():

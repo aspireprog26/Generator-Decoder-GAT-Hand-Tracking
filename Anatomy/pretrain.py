@@ -1,24 +1,18 @@
-import sys
 import torch
 import json
 import optuna 
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 from pathlib import Path
-from trainer import Trainer
+from Anatomy.pretrainer import Trainer
 from model import AnatomyModel
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-sys.path.insert(0, "/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Model")
-from Model.optimize import Losses
-
-mode = "optuna"
 configs = {
     "lr": 1e-4,
     "dropout": 0.2,
-    "batch_size": 32,
+    "batch_size": 64,
     "input_size": 4,
     "hidden_size": 64,
     "output_size": 100,
@@ -27,7 +21,8 @@ configs = {
     "weight_decay": 1e-2,
     "model_dir": "/home/mrtcloud-1/Documents/Hand-Tracking-2/Anatomy",
     "model_name": "anatomy.pth",
-    "data_dir": "/home/mrtcloud-1/Documents/StereoDataset",
+    "data_dir": "/home/mrtcloud-1/Documents/StereoSTBDataset",
+    "post_data_dir": "/home/mrtcloud-1/Documents/StereoDataset",
     "es_patience": 10,
     "es_thresh": 1e-4,
     "scheduler_factor": 0.5,
@@ -40,11 +35,9 @@ def saveConfigs():
         json.dump(configs, f, indent = 4)
 
 def collate(batch):
-    inputs, targets = zip(*batch)
-    input_batch = Batch.from_data_list(list(inputs))
-    inputs = torch.stack(input_batch, dim = 0).float()
-    targets = torch.stack(targets, dim = 0).float()
-    return inputs, targets
+    coords, _ = zip(*batch)
+    coord_batch = Batch.from_data_list(list(coords))
+    return coord_batch
 
 criterion = nn.MSELoss()
 train_dataset = torch.load(Path(configs["data_dir"]) / "Training" / "dataset.pt")
@@ -83,7 +76,7 @@ def train():
         threshold = configs["es_thresh"]
     )
     trainer = Trainer(model, configs, train_loader, val_loader, criterion, optimizer, scheduler)
-    trainer.train()
+    trainer.train(trial = None)
 
 def objective(trial):
     trial_configs = configs.copy()
@@ -120,23 +113,20 @@ def objective(trial):
     val_loss = trainer.train(trial)
     return val_loss
 
-if mode == "optuna":
-    study = optuna.create_study(
-        direction = "minimize",
-        pruner = optuna.pruners.MedianPruner(
-            n_startup_trials = 5,
-            n_warmup_steps = 20
-        )
+study = optuna.create_study(
+    direction = "minimize",
+    pruner = optuna.pruners.MedianPruner(
+        n_startup_trials = 5,
+        n_warmup_steps = 20
     )
-    study.optimize(objective, n_trials = 50)
+)
+study.optimize(objective, n_trials = 50)
 
-    print(f"Best loss: {study.best_value}")
-    print("\nBest parameters:")
-    for key, value in study.best_params.items():
-        print(key, value)
-    configs.update(study.best_params)
-    train()
-else:
-    train()
+print(f"Best loss: {study.best_value}")
+print("\nBest parameters:")
+for key, value in study.best_params.items():
+    print(key, value)
 
+configs.update(study.best_params)
 saveConfigs()
+train()
