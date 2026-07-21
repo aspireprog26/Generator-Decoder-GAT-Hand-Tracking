@@ -9,7 +9,7 @@ import rpy2.robjects as ro
 from rpy2.robjects import numpy2ri
 from sklearn.decomposition import PCA
 from optimizedataset import DatasetOptimizer
-from sklearn.preprocessing import StandardScaler
+from collections import Counter
 
 class Clusters:
     def __init__(self):
@@ -22,20 +22,21 @@ class Clusters:
         self.errors = None
 
         self.clusterer = hdbscan.HDBSCAN(
-            min_cluster_size = 50,
-            min_samples = 5,
-            prediction_data = True
+            min_cluster_size = 10,
+            min_samples = 1,
+            prediction_data = True,
+            cluster_selection_epsilon = 1.608
         )
 
     def loadData(self):
-        optimizer = DatasetOptimizer()
+        features = DatasetOptimizer(mp = False).getFeatures
         data = []
         errors = []
 
         for type in self.types:
             for pt in (self.data_dir / f'{type}Normalized').glob("*.pt"):
                 point = (torch.load(pt)[2]).numpy()
-                point_normalized = (optimizer.getFeatures(point, None)[0]).flatten()
+                point_normalized = (features(point, None, False)[0]).flatten()
                 error = (torch.load(pt)[3]).numpy()
                 errors.append(error)
                 data.append(point_normalized)
@@ -52,20 +53,16 @@ class Clusters:
             np.save(mean_matrix, cluster_path)
 
     def createClusters(self):
-        self.data, self.errors = self.loadData()
-        data_normalized = StandardScaler().fit_transform(self.data)
-        
-        data_pca = PCA(n_components = 0.95).fit_transform(data_normalized)         # Keep top k components that describe 95% of the variance
+        self.data, self.errors = self.loadData()    
+        data_pca = PCA(n_components = 0.95).fit_transform(self.data)         # Keep top k components that describe 95% of the variance
         self.clusterer.fit(data_pca)
         self.labels = self.clusterer.labels_
-
+        sizes = Counter(self.labels[self.labels != -1])
+        print(sizes)
         print(self.labels.max())
         print(np.count_nonzero(self.labels == -1))
-
-        reducer = umap.UMAP(
-            n_components = 2,
-            random_state = 42
-        )
+        
+        reducer = umap.UMAP(n_components = 2)
         data_2d = reducer.fit_transform(data_pca)
 
         plt.scatter(
@@ -111,4 +108,4 @@ class Clusters:
 
 clusters = Clusters()
 clusters.createClusters()
-clusters.getClusterData()
+#clusters.getClusterData()

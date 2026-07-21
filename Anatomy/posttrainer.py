@@ -5,11 +5,21 @@ from pathlib import Path
 import earlystopper as es
 from torch.utils.data import DataLoader
 
+
 class Trainer:
-    def __init__(self, model: nn.Module, configs: dict, train_loader: DataLoader, val_loader: DataLoader, criterion: nn, optimizer: optim, scheduler):
+    def __init__(
+        self,
+        model: nn.Module,
+        configs: dict,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        criterion: nn,
+        optimizer: optim,
+        scheduler,
+    ):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model
-        
+
         self.train_loader = train_loader
         self.val_loader = val_loader
 
@@ -28,18 +38,22 @@ class Trainer:
         for epoch in range(self.num_epochs):
             self.model.train()
             train_loss = 0
-            for batch, target in self.train_loader:
+
+            for batch, target, coords_proj in self.train_loader:
                 batch = batch.to(self.device)
                 target = target.to(self.device)
+                coords_proj = coords_proj.to(self.device)
 
                 features = batch.x
                 edge_index = batch.edge_index
                 b = batch.batch
 
                 self.optimizer.zero_grad()
-                output = self.model(features, edge_index, b)
-                loss = self.criterion(output, target)
-                
+                error = self.model(features, edge_index, b)
+                scale = torch.linalg.norm(coords_proj[9] - coords_proj[0])
+                pred = coords_proj + (scale * error)
+                loss = self.criterion(pred, target)
+
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item()
@@ -47,25 +61,32 @@ class Trainer:
 
             self.model.eval()
             val_loss = 0
-            with torch.no_grad():
-                for batch, target in self.val_loader:
+
+            with torch.inference_mode():
+                for batch, target, coords_proj in self.val_loader:
                     batch = batch.to(self.device)
                     target = target.to(self.device)
+                    coords_proj = coords_proj.to(self.device)
 
                     features = batch.x
                     edge_index = batch.edge_index
                     b = batch.batch
 
-                    output = self.model(features, edge_index, b)
-                    loss = self.criterion(output, target)
+                    error = self.model(features, edge_index, b)
+                    scale = torch.linalg.norm(coords_proj[9] - coords_proj[0])
+                    pred = coords_proj + (scale * error)
+
+                    loss = self.criterion(pred, target)
                     val_loss += loss.item()
             val_loss /= len(self.val_loader)
 
             if self.scheduler is not None:
                 self.scheduler.step(val_loss)
-            current_lr = self.optimizer.param_groups[0]['lr']
-            print(f"Epoch: {epoch + 1} | Train Loss: {train_loss} | Val Loss: {val_loss} | LR: {current_lr}")
-                
+            current_lr = self.optimizer.param_groups[0]["lr"]
+            print(
+                f"Epoch: {epoch + 1} | Train Loss: {train_loss} | Val Loss: {val_loss} | LR: {current_lr}"
+            )
+
             self.early_stopper(val_loss, self.model)
             if self.early_stopper.stopping:
                 print(f"Early Stopping at epoch {epoch + 1} / {self.num_epochs}")

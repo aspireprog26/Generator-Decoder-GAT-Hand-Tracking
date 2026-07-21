@@ -4,6 +4,7 @@ import numpy as np
 import torch.nn as nn
 from pathlib import Path
 from model import AnatomyModel
+from torch_geometric.data import Batch
 from torch.utils.data import DataLoader
 
 with open("/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Anatomy/configs.json", "r") as f:
@@ -18,11 +19,18 @@ weights = torch.load((Path(configs["model_dir"]) / configs["model_name"]), weigh
 model.load_state_dict(weights)
 model.eval()
 
-dataset = torch.load(Path(configs["data_dir"]) / "Testing" / "dataset.pt")
-loader = DataLoader(
-    dataset = dataset,
+def collate(batch):
+    coords, _ = zip(*batch)
+    coord_batch = Batch.from_data_list(list(coords))
+    return coord_batch
+
+test_dataset = torch.load(Path(configs["data_dir"]) / "Testing" / "dataset.pt")
+test_loader = DataLoader(
+    dataset = test_dataset, 
     num_workers = configs["num_workers"],
     batch_size = configs["batch_size"],
+    drop_last = configs["drop_last"],
+    collate_fn = collate
 )
 
 def evalModel():
@@ -30,18 +38,18 @@ def evalModel():
     test_nmse_loss = 0
     total_samples = 0
 
-    loss_fn = nn.MSELoss()
-    for input, target in loader:
+    criterion = nn.MSELoss()
+    for input, target in test_loader:
         input = input.to(device)
         target = target.to(device)
-        with torch.no_grad():
+        with torch.inference_mode():
             output = model(input)
-            mse_loss = loss_fn(output, target)
-            test_mse_loss += mse_loss.item()
-            #test_nmse_loss += nmse(output.detach().cpu().numpy(), target.detach().cpu().numpy()) * input.shape[0]
+            loss = criterion(output, target)
+            test_mse_loss += loss.item()
+            #test_nmse_loss += nmse(output.cpu().numpy(), target.cpu().numpy()) * input.shape[0]
         #total_samples += input.shape[0]
 
-    avg_mse_loss = test_mse_loss / len(loader)
+    avg_mse_loss = test_mse_loss / len(test_loader)
     #avg_nmse_loss = test_nmse_loss / total_samples
     return avg_mse_loss #[avg_mse_loss, avg_nmse_loss]
 

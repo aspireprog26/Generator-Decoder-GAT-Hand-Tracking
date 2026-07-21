@@ -4,18 +4,18 @@ import optuna
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
-from Anatomy.pretrainer import Trainer
 from model import AnatomyModel
-from torch.utils.data import DataLoader
+from Anatomy.pretrainer import Trainer
 from torch_geometric.data import Batch
+from torch.utils.data import DataLoader
 
 configs = {
-    "lr": 1e-4,
+    "lr": 1e-3,
     "dropout": 0.2,
     "batch_size": 64,
-    "input_size": 4,
+    "input_size": 7,
     "hidden_size": 64,
-    "output_size": 100,
+    "output_size": 3,
     "num_workers": 2,
     "num_epochs": 250,
     "weight_decay": 1e-2,
@@ -29,7 +29,7 @@ configs = {
     "scheduler_patience": 5,
     "drop_last": False
 }
- 
+
 def saveConfigs():
     with open((Path(configs["model_dir"]) / "configs.json"), "w") as f:
         json.dump(configs, f, indent = 4)
@@ -120,7 +120,7 @@ study = optuna.create_study(
         n_warmup_steps = 20
     )
 )
-study.optimize(objective, n_trials = 50)
+study.optimize(objective, n_trials = 25)
 
 print(f"Best loss: {study.best_value}")
 print("\nBest parameters:")

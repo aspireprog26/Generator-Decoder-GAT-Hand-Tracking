@@ -11,8 +11,10 @@ import keypointdetection as kp  # type: ignore
 from constrain import OptimizeHands
 
 class DatasetOptimizer:
-    def __init__(self):
-        self.pose = kp.MediaPipe()
+    def __init__(self, mp: bool):
+        if mp:
+            self.pose = kp.MediaPipe()
+
         self.data_dir = Path("/home/mrtcloud-1/Documents/StereoDataset")
         self.stb_dir = Path("/home/mrtcloud-1/Documents/StereoSTBDataset/")
         self.label_dir = self.stb_dir / "labels"
@@ -102,50 +104,70 @@ class DatasetOptimizer:
         coords_transposed = np.transpose(coords, (2, 1, 0))     # Turns into shape (1500, 21, 3)
         return coords_transposed[frame, ...]                    # Returns shape (21, 3)
     
-    def getFeatures(self, coords: np.ndarray, noise: None):
-        # Can be used for STB in training loop or for the stereo dataset normalization
-        scale = np.linalg.norm(coords[9] - coords[0])
-        coords_proj = (coords - (scale * noise)) if noise is not None else coords
-        scale = np.linalg.norm(coords_proj[9] - coords_proj[0])
+    def getFeatures(self, c: np.ndarray, n: None, batch: False):
+        def features(coords, noise):
+            # Can be used for STB in training loop or for the stereo dataset normalization
+            scale = np.linalg.norm(coords[9] - coords[0])
+            coords_proj = (coords - (scale * noise)) if noise is not None else coords
+            scale = np.linalg.norm(coords_proj[9] - coords_proj[0])
+            
+            coords_proj_norm = (coords_proj - coords_proj[0]) / scale
+
+            wrist_unit = coords_proj[0] / np.linalg.norm(coords_proj[0])
+            wrist_node_length = 0
+            wrist_vec = np.append(wrist_unit, wrist_node_length)
+
+            coords_normalized = coords_proj_norm.tolist()
+            coords_normalized[0].extend(wrist_vec.tolist())
+
+            for finger in range(5):
+                MCP = 1 + 4 * finger
+                PIP = 2 + 4 * finger
+                DIP = 3 + 4 * finger
+                TIP = 4 + 4 * finger
+
+                mcp_unit = coords_proj[MCP] / np.linalg.norm(coords_proj[MCP])
+                mcp_node_length = (np.linalg.norm(coords_proj[PIP] - coords_proj[MCP]) / scale)
+                mcp_vec = np.append(mcp_unit, mcp_node_length)
+
+                pip_unit = coords_proj[PIP] / np.linalg.norm(coords_proj[PIP])
+                pip_node_length = (np.linalg.norm(coords_proj[DIP] - coords_proj[PIP]) / scale)
+                pip_vec = np.append(pip_unit, pip_node_length)
+                
+                dip_unit = coords_proj[DIP] / np.linalg.norm(coords_proj[DIP])
+                dip_node_length = (np.linalg.norm(coords_proj[TIP] - coords_proj[DIP]) / scale)
+                dip_vec = np.append(dip_unit, dip_node_length)
+
+                tip_unit = coords_proj[TIP] / np.linalg.norm(coords_proj[TIP])
+                tip_node_length = 0
+                tip_vec = np.append(tip_unit, tip_node_length)
+
+                coords_normalized[MCP].extend(mcp_vec.tolist())
+                coords_normalized[PIP].extend(pip_vec.tolist())
+                coords_normalized[DIP].extend(dip_vec.tolist())
+                coords_normalized[TIP].extend(tip_vec.tolist())
+                
+            features = np.array(coords_normalized)
+            return features, coords_proj, scale.item()
         
-        coords_proj_norm = (coords_proj - coords_proj[0]) / scale
+        if batch is False:
+            return features(c, n)
+        else:
+            # Account for batch dimension in the training data
+            normalized_features = []
+            coords_proj = []
+            scale = []
 
-        wrist_unit = coords_proj[0] / np.linalg.norm(coords_proj[0])
-        wrist_node_length = 0
-        wrist_vec = np.append(wrist_unit, wrist_node_length)
-
-        coords_normalized = coords_proj_norm.tolist()
-        coords_normalized[0].extend(wrist_vec.tolist())
-
-        for finger in range(5):
-            MCP = 1 + 4 * finger
-            PIP = 2 + 4 * finger
-            DIP = 3 + 4 * finger
-            TIP = 4 + 4 * finger
-
-            mcp_unit = coords_proj[MCP] / np.linalg.norm(coords_proj[MCP])
-            mcp_node_length = (np.linalg.norm(coords_proj[PIP] - coords_proj[MCP]) / scale)
-            mcp_vec = np.append(mcp_unit, mcp_node_length)
-
-            pip_unit = coords_proj[PIP] / np.linalg.norm(coords_proj[PIP])
-            pip_node_length = (np.linalg.norm(coords_proj[DIP] - coords_proj[PIP]) / scale)
-            pip_vec = np.append(pip_unit, pip_node_length)
+            for i in range(c.shape[0]):
+                ft, cp, s = features(c[i], n)
+                normalized_features.append(ft)
+                coords_proj.append(cp)
+                scale.append(s)
             
-            dip_unit = coords_proj[DIP] / np.linalg.norm(coords_proj[DIP])
-            dip_node_length = (np.linalg.norm(coords_proj[TIP] - coords_proj[DIP]) / scale)
-            dip_vec = np.append(dip_unit, dip_node_length)
-
-            tip_unit = coords_proj[TIP] / np.linalg.norm(coords_proj[TIP])
-            tip_node_length = 0
-            tip_vec = np.append(tip_unit, tip_node_length)
-
-            coords_normalized[MCP].extend(mcp_vec.tolist())
-            coords_normalized[PIP].extend(pip_vec.tolist())
-            coords_normalized[DIP].extend(dip_vec.tolist())
-            coords_normalized[TIP].extend(tip_vec.tolist())
-            
-        features = np.array(coords_normalized)
-        return features, coords_proj, scale
+            normalized_features = np.stack(normalized_features)
+            coords_proj = np.stack(coords_proj)
+            scale = np.stack(scale)
+            return normalized_features, coords_proj, scale
 
     def saveSTB(self, start, end, path):
         count = 0
@@ -163,7 +185,7 @@ class DatasetOptimizer:
                 coords_proj, coords_optim = np.load(pt)
                 scale_opt = np.linalg.norm(coords_optim[9] - coords_optim[0])
                 error = (coords_optim - coords_proj) / scale_opt
-                normalized_coords = self.getFeatures(coords_proj, None)[0]
+                normalized_coords = self.getFeatures(coords_proj, None, False)[0]
                 data = (torch.tensor(coords_proj), torch.tensor(normalized_coords), torch.tensor(coords_optim), torch.tensor(error))
                 torch.save(data, (self.data_dir / f'{img_type}Normalized' / f'{count}.pt'))
                 count += 1
@@ -217,7 +239,8 @@ class DatasetOptimizer:
                 save_path = self.data_dir / type / f"{img.stem}.npy"
                 os.remove(save_path)
 
-#optimizer = DatasetOptimizer()
-#optimizer.optimize()
-#optimizer.removeOld()
-#optimizer.saveData()
+"""
+optimizer = DatasetOptimizer(mp = True)
+optimizer.optimize()
+optimizer.saveData()
+"""

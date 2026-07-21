@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from torch_geometric.nn import GATConv
 
@@ -23,7 +24,7 @@ class GraphAttentionNet(nn.Module):
 class Regressor(nn.Module):
     def __init__(self, input_size, output_size, dropout):
         super().__init__()
-        hidden1 = 512
+        hidden1 = torch.floor(torch.log2(input_size))
 
         self.fc1 = nn.Linear(input_size, hidden1)
         self.layer_norm1 = nn.LayerNorm(hidden1)

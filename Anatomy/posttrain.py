@@ -11,6 +11,11 @@ from torch_geometric.data import Batch
 with open("/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Anatomy/configs.json", "r") as f:
     configs = json.load(f)
 
+configs["lr"] = 1e-4
+configs["dropout"] = 0.3
+configs["batch_size"] = 32
+configs["es_patience"] = 5
+ 
 def collate(batch):
     graphs, targets, raw_coords = zip(*batch)
     batch = Batch.from_data_list(list(graphs))
