@@ -13,8 +13,8 @@ with open(
 ) as f:
     configs = json.load(f)
 
-configs["lr"] = 1e-4
-configs["dropout"] = 0.3
+configs["decoder_lr"] = 1e-4
+configs["decoder_dropout"] = 0.3
 configs["batch_size"] = 32
 configs["es_patience"] = 5
 
@@ -51,9 +51,10 @@ criterion = nn.MSELoss()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = AnatomyModel(
     configs["input_size"],
-    configs["hidden_size"],
-    configs["output_size"],
-    configs["dropout"],
+    configs["decoder_hidden_size"],
+    configs["decoder_output_size"],
+    configs["decoder_dropout"],
+    generator=False,
 ).to(device)
 
 weights = torch.load(
@@ -64,7 +65,7 @@ weights = torch.load(
 model.load_state_dict(weights)
 
 optimizer = optim.AdamW(
-    model.parameters(), lr=configs["lr"], weight_decay=configs["weight_decay"]
+    model.parameters(), lr=configs["decoder_lr"], weight_decay=configs["weight_decay"]
 )
 
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(

@@ -12,16 +12,19 @@ from torch.utils.data import DataLoader
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
-    "dropout": 0.2,
+    "generator_dropout": 0.2,
+    "decoder_dropout": 0.2,
     "batch_size": 64,
     "input_size": 7,
-    "hidden_size": 64,
+    "decoder_hidden_size": 32,
+    "generator_hidden_size": 64,
     "decoder_output_size": 3,
     "generator_output_size": 65,
     "num_workers": 2,
     "num_epochs": 250,
     "weight_decay": 1e-2,
-    "model_name": "decoder.pth",
+    "decoder_model_name": "decoder.pth",
+    "generator_model_name": "generator.pth",
     "model_dir": "/home/mrtcloud-1/Documents/Hand-Tracking-2/Model",
     "data_dir": "/home/mrtcloud-1/Documents/StereoSTBDataset",
     "post_data_dir": "/home/mrtcloud-1/Documents/StereoDataset",
@@ -38,10 +41,18 @@ def saveConfigs():
         json.dump(configs, f, indent=4)
 
 
-def collate(batch):
+def collateDecoder(batch):
     coords, _ = zip(*batch)
     coord_batch = Batch.from_data_list(list(coords))
     return coord_batch
+
+
+def collateGenerator(batch):
+    graphs, targets, raw_coords = zip(*batch)
+    batch = Batch.from_data_list(list(graphs))
+    targets = torch.stack(targets, dim=0).float()
+    raw_coords = torch.stack(raw_coords, dim=0).float()
+    return (batch, targets, raw_coords)
 
 
 criterion = nn.MSELoss()
@@ -66,7 +77,7 @@ def createDataset(batch_size):
         num_workers=configs["num_workers"],
         batch_size=batch_size,
         shuffle=True,
-        collate_fn=collate,
+        collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
     )
 
@@ -74,24 +85,24 @@ def createDataset(batch_size):
         dataset=decoder_val_dataset,
         num_workers=configs["num_workers"],
         batch_size=batch_size,
-        collate_fn=collate,
+        collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
     )
 
     generator_train_loader = DataLoader(
         dataset=generator_train_dataset,
         num_workers=configs["num_workers"],
-        batch_size=batch_size,
+        batch_size=batch_size * 3,
         shuffle=True,
-        collate_fn=collate,
+        collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
     )
 
     generator_val_loader = DataLoader(
         dataset=generator_val_dataset,
         num_workers=configs["num_workers"],
-        batch_size=batch_size,
-        collate_fn=collate,
+        batch_size=batch_size * 3,
+        collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
     )
 
@@ -113,9 +124,10 @@ def train(cfgs: dict, trial=None):
 
     decoder_model = AnatomyModel(
         cfgs["input_size"],
-        cfgs["hidden_size"],
+        cfgs["decoder_hidden_size"],
         cfgs["decoder_output_size"],
-        cfgs["dropout"],
+        cfgs["decoder_dropout"],
+        generator=False,
     )
 
     decoder_optimizer = optim.AdamW(
@@ -135,9 +147,10 @@ def train(cfgs: dict, trial=None):
 
     generator_model = AnatomyModel(
         cfgs["input_size"],
-        cfgs["hidden_size"],
+        cfgs["generator_hidden_size"],
         cfgs["generator_output_size"],
-        cfgs["dropout"],
+        cfgs["generator_dropout"],
+        generator=True,
     )
 
     generator_optimizer = optim.AdamW(
@@ -175,10 +188,12 @@ def train(cfgs: dict, trial=None):
 
 def objective(trial):
     trial_configs = configs.copy()
-    hidden_size = trial.suggest_int("hidden_size", 32, 256, step=32)
-    dropout = trial.suggest_float("dropout", 0.1, 0.5)
-    decoder_lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
-    generator_lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+    generator_hidden_size = trial.suggest_int("generator_hidden_size", 32, 64, step=16)
+    decoder_hidden_size = trial.suggest_int("decoder_hidden_size", 32, 64, step=16)
+    generator_dropout = trial.suggest_float("generator_dropout", 0.1, 0.3)
+    decoder_dropout = trial.suggest_float("decoder_dropout", 0.2, 0.4)
+    decoder_lr = trial.suggest_float("decoder_lr", 1e-5, 1e-3, log=True)
+    generator_lr = trial.suggest_float("generator_lr", 1e-5, 1e-3, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
     scheduler_factor = trial.suggest_float("scheduler_factor", 0.2, 0.7)
@@ -188,8 +203,10 @@ def objective(trial):
         {
             "decoder_lr": decoder_lr,
             "generator_lr": generator_lr,
-            "hidden_size": hidden_size,
-            "dropout": dropout,
+            "generator_hidden_size": generator_hidden_size,
+            "decoder_hidden_size": decoder_hidden_size,
+            "generator_dropout": generator_dropout,
+            "decoder_dropout": decoder_dropout,
             "weight_decay": weight_decay,
             "batch_size": batch_size,
             "scheduler_factor": scheduler_factor,
@@ -197,7 +214,10 @@ def objective(trial):
         }
     )
 
-    val_loss = train(trial_configs, trial)
+    train_loss, val_loss = train(trial_configs, trial)
+    print(
+        f"\nTrial Number: {trial.number} | Train Loss: {train_loss} | Validation Loss: {val_loss}"
+    )
     return val_loss
 
 
