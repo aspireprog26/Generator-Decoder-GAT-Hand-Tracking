@@ -100,7 +100,7 @@ def evalModel():
     with torch.inference_mode():
         for decoder_batch in decoder_test_loader:
             decoder_batch = decoder_batch.to(device)
-            decoder_coords = decoder_batch.x
+            decoder_coords = decoder_batch.x.float()
             decoder_edge_index = decoder_batch.edge_index
             decoder_b = decoder_batch.batch
 
@@ -115,15 +115,20 @@ def evalModel():
                 )
                 mean_mat = mean_mat.reshape(21, 3)
                 Z = torch.rand_like(mean_mat)
-                noise = mean_mat + (scale_col * scale_row) * (chol_row @ Z @ chol_col)
+                noise = mean_mat + torch.sqrt(scale_col * scale_row) * (
+                    chol_row @ Z @ chol_col.T
+                )
 
                 normalized_coords, coords_proj, scale = features(
                     decoder_coords.detach().cpu().numpy(), noise, True
                 )  # Distorted 3D normalized features with noise
-
-                normalized_coords = torch.tensor(normalized_coords).to(device)
-                coords_proj = torch.tensor(coords_proj).to(device)
-                scale = torch.tensor(scale).to(device)
+                normalized_coords = torch.as_tensor(
+                    normalized_coords, dtype=torch.float32, device=device
+                )
+                coords_proj = torch.as_tensor(
+                    coords_proj, dtype=torch.float32, device=device
+                )
+                scale = torch.as_tensor(scale, dtype=torch.float32, device=device)
 
                 errors = decoder_model(normalized_coords, decoder_edge_index, decoder_b)
                 pred_coords = coords_proj + (scale * errors)
@@ -134,7 +139,7 @@ def evalModel():
     # Generator
     with torch.inference_mode():
         for generator_batch, gen_targets, gen_raw in generator_test_loader:
-            generator_features = generator_batch.x
+            generator_features = generator_batch.x.float()
             generator_edge_index = generator_batch.edge_index
             generator_b = generator_batch.batch
 

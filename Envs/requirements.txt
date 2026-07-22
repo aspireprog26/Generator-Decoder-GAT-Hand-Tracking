@@ -1,0 +1,12 @@
+optuna
+torch torchvision torchaudio
+torch_geometric
+opencv-python
+numpy
+scipy
+pathlib
+itertools
+mediapipe
+json
+math
+pynput

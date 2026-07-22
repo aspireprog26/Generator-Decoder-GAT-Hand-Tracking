@@ -42,8 +42,7 @@ def saveConfigs():
 
 
 def collateDecoder(batch):
-    coords, _ = zip(*batch)
-    coord_batch = Batch.from_data_list(list(coords))
+    coord_batch = Batch.from_data_list(batch)
     return coord_batch
 
 
@@ -57,17 +56,17 @@ def collateGenerator(batch):
 
 criterion = nn.MSELoss()
 decoder_train_dataset = torch.load(
-    Path(configs["data_dir"]) / "Training" / "dataset.pt"
+    Path(configs["data_dir"]) / "Training" / "dataset.pt", weights_only=False
 )
 decoder_val_dataset = torch.load(
-    Path(configs["data_dir"]) / "Validation" / "dataset.pt"
+    Path(configs["data_dir"]) / "Validation" / "dataset.pt", weights_only=False
 )
 
 generator_train_dataset = torch.load(
-    Path(configs["post_data_dir"]) / "Training" / "dataset.pt"
+    Path(configs["post_data_dir"]) / "Training" / "dataset.pt", weights_only=False
 )
 generator_val_dataset = torch.load(
-    Path(configs["post_data_dir"]) / "Validation" / "dataset.pt"
+    Path(configs["post_data_dir"]) / "Validation" / "dataset.pt", weights_only=False
 )
 
 
@@ -92,7 +91,7 @@ def createDataset(batch_size):
     generator_train_loader = DataLoader(
         dataset=generator_train_dataset,
         num_workers=configs["num_workers"],
-        batch_size=batch_size * 3,
+        batch_size=batch_size,
         shuffle=True,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
@@ -101,7 +100,7 @@ def createDataset(batch_size):
     generator_val_loader = DataLoader(
         dataset=generator_val_dataset,
         num_workers=configs["num_workers"],
-        batch_size=batch_size * 3,
+        batch_size=batch_size,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
     )

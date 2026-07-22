@@ -15,7 +15,7 @@ ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
 
 class Video:
     def __init__(self, cam_index):
-        print(f"Initializing stereo camera.")
+        print("Initializing stereo camera.")
 
         self.running = True
         self.cam = cv2.VideoCapture(cam_index)
