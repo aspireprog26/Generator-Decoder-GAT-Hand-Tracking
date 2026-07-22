@@ -5,7 +5,7 @@ from pynput import keyboard
 from threading import Thread
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking\Model")
+sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking\Keypoints")
 sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking\Utils")
 import utility as ut
 import keypointdetection as kp  # type: ignore

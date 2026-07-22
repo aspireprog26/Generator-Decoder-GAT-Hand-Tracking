@@ -1,8 +1,6 @@
 import sys
 import torch
 import optuna
-import joblib
-import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
@@ -11,25 +9,38 @@ from torch.utils.data import DataLoader
 
 sys.path.insert(0, "/home/mrtcloud-1/Documents/Hand-Tracking-2/Dataset")
 from optimizedataset import DatasetOptimizer
+
+
 class Trainer:
     def __init__(
         self,
-        model: nn.Module,
         configs: dict,
-        train_loader: DataLoader,
-        val_loader: DataLoader,
         criterion: nn,
-        optimizer: optim,
-        scheduler,
+        decoder_model: nn.Module,
+        generator_model: nn.Module,
+        decoder_train_loader: DataLoader,
+        decoder_val_loader: DataLoader,
+        generator_train_loader: DataLoader,
+        generator_val_loader: DataLoader,
+        decoder_optimizer: optim,
+        generator_optimizer: optim,
+        decoder_scheduler,
+        generator_scheduler,
     ):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = model.to(self.device)
+        self.decoder_model = decoder_model.to(self.device)
+        self.generator_model = generator_model.to(self.device)
 
-        self.train_loader = train_loader
-        self.val_loader = val_loader
+        self.decoder_train_loader = decoder_train_loader
+        self.decoder_val_loader = decoder_val_loader
+        self.generator_train_loader = generator_train_loader
+        self.generator_val_loader = generator_val_loader
 
-        self.optimizer = optimizer
-        self.scheduler = scheduler
+        self.decoder_optimizer = decoder_optimizer
+        self.decoder_scheduler = decoder_scheduler
+        self.generator_optimizer = generator_optimizer
+        self.generator_scheduler = generator_scheduler
+
         self.criterion = criterion
 
         self.num_epochs = configs["num_epochs"]
@@ -37,60 +48,52 @@ class Trainer:
         patience = configs["es_patience"]
 
         model_save_path = Path(configs["model_dir"]) / configs["model_name"]
-        self.cluster_dir = configs["post_data_dir"] / "Clusters"
 
         self.early_stopper = es.EarlyStopping(patience, min_delta, model_save_path)
-        self.features = DatasetOptimizer(mp = False).getFeatures
-        self.clusterer = joblib.load(
-            configs["post_data_dir"] / "Clusters" / "poseclusterer.joblib"
-        )
+        self.features = DatasetOptimizer(mp=False).getFeatures
 
-        self.chol_row = np.load(self.cluster_dir / "cholrow.npy")
-        self.chol_col = np.load(self.cluster_dir / "cholcol.npy")
+        self.chol_row = torch.load(configs["post_data_dir"] / "cholrow.pt")
+        self.chol_col = torch.load(configs["post_data_dir"] / "cholcol.pt")
 
-    def generateErrors(self, labels):
-        errors = []
-        for label in labels.tolist():
-            mean_mat = self.cluster_dir / f"meanmat{label}.npy"
-            Z = np.random.randn(*mean_mat.shape)
-            sample = mean_mat + self.chol_row @ Z @ self.chol_col.T
-            errors.append(sample)
-
-        return torch.stack(errors, dim=0)
-
-    def train(self, trial = None):
+    def train(self, trial=None):
         for epoch in range(self.num_epochs):
-            self.model.train()
+            self.generator_model.train()
+            self.decoder_model.train()
             train_loss = 0
-            for batch in self.train_loader:
+            for batch in self.decoder_train_loader:
                 batch = batch.to(self.device)
                 coords = batch.x
                 edge_index = batch.edge_index
                 b = batch.batch
 
                 self.optimizer.zero_grad()
-                
-                normalized_coords, coords_proj, scale = self.features(coords.detach().cpu().numpy(), None, True)                # Original 3D normalizaed features
-                
+
+                normalized_coords, coords_proj, scale = self.features(
+                    coords.detach().cpu().numpy(), None, True
+                )  # Original 3D normalizaed features
                 noise = self.generateErrors()
-                normalized_coords, coords_proj, scale = self.features(coords.detach().cpu().numpy(), noise, True)               # Distorted 3D normalized features with nouse
+                normalized_coords, coords_proj, scale = self.features(
+                    coords.detach().cpu().numpy(), noise, True
+                )  # Distorted 3D normalized features with noise
+
                 normalized_coords = torch.tensor(normalized_coords).to(self.device)
                 coords_proj = torch.tensor(coords_proj).to(self.device)
                 scale = torch.tensor(scale).to(self.device)
 
                 errors = self.model(normalized_coords, edge_index, b)
                 pred = coords_proj + (scale * errors)
-                loss = self.criterion(pred, target)
+                loss = self.criterion(pred, coords)
 
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item()
             train_loss /= len(self.train_loader)
 
-            self.model.eval()
+            self.generator_model.eval()
+            self.decoder_model.eval()
             val_loss = 0
             with torch.inference_mode():
-                for batch, target in self.val_loader:
+                for batch, target in self.decoder_val_loader:
                     batch = batch.to(self.device)
                     target = target.to(self.device)
 
@@ -105,6 +108,7 @@ class Trainer:
 
             if self.scheduler is not None:
                 self.scheduler.step(val_loss)
+
             current_lr = self.optimizer.param_groups[0]["lr"]
             print(
                 f"Epoch: {epoch + 1} | Train Loss: {train_loss} | Val Loss: {val_loss} | LR: {current_lr}"

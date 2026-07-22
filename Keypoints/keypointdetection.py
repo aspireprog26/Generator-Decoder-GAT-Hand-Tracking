@@ -16,20 +16,40 @@ warnings.filterwarnings("ignore")
 # Define the Hand Skeleton connections. Each tuple draws a line between keypoints A and B
 # The keypoints indices match the model's output ordering.
 
-HAND_SKELETON = [ 
-    (0, 1), (1, 2), (2, 3), (3, 4),
-    (0, 5), (5, 6), (6, 7), (7, 8),
-    (0, 9), (9, 10), (10, 11), (11, 12),
-    (0, 13), (13, 14), (14, 15), (15, 16),
-    (0, 17), (17, 18), (18, 19), (19, 20)
+HAND_SKELETON = [
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 4),
+    (0, 5),
+    (5, 6),
+    (6, 7),
+    (7, 8),
+    (0, 9),
+    (9, 10),
+    (10, 11),
+    (11, 12),
+    (0, 13),
+    (13, 14),
+    (14, 15),
+    (15, 16),
+    (0, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
 ]
 
 ANGLE_JOINTS = [
-    (1, 2, 3), (2, 3, 4),
-    (5, 6, 7), (6, 7, 8),
-    (9, 10, 11), (10, 11, 12),
-    (13, 14, 15), (14, 15, 16),
-    (17, 18, 19), (18, 19, 20)
+    (1, 2, 3),
+    (2, 3, 4),
+    (5, 6, 7),
+    (6, 7, 8),
+    (9, 10, 11),
+    (10, 11, 12),
+    (13, 14, 15),
+    (14, 15, 16),
+    (17, 18, 19),
+    (18, 19, 20),
 ]
 
 """
@@ -292,19 +312,20 @@ class RTMPose:
         return results, score 
 """
 
+
 class MediaPipe:
     def __init__(self):
         self.mp_hands = mp.solutions.hands
         self.mp_draw = mp.solutions.drawing_utils
-        
+
         self.hands = self.mp_hands.Hands(
-            static_image_mode = False,
-            max_num_hands = 1,
-            min_detection_confidence = 0.3,
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.3,
         )
 
     def get_keypoints(self, frame):
-        kps = np.zeros((21, 2), dtype = np.float32)
+        kps = np.zeros((21, 2), dtype=np.float32)
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb_frame)
 
@@ -315,7 +336,7 @@ class MediaPipe:
                     px, py = int(lm.x * w), int(lm.y * h)
                     kps[idx] = [px, py]
         return kps
-    
+
     def draw_hand(self, coords, frame):
         frame = frame.copy()
         for a, b in HAND_SKELETON:
@@ -324,13 +345,15 @@ class MediaPipe:
 
             pt1 = (int(round(p1[0])), int(round(p1[1])))
             pt2 = (int(round(p2[0])), int(round(p2[1])))
-            cv2.line(frame, pt1, pt2, (12, 27, 196), 2)      # Color the lines of the keypoint skeleton
-        
+            cv2.line(
+                frame, pt1, pt2, (12, 27, 196), 2
+            )  # Color the lines of the keypoint skeleton
+
         for i in range(21):
             x = coords[i][0]
             y = coords[i][1]
             center = (int(round(x)), int(round(y)))
-            cv2.circle(frame, center, 5, (0, 0, 255), -1)         # Inner circle
-            cv2.circle(frame, center, 5, (0, 0, 0), 1)      # Border circle  
-        
+            cv2.circle(frame, center, 5, (0, 0, 255), -1)  # Inner circle
+            cv2.circle(frame, center, 5, (0, 0, 0), 1)  # Border circle
+
         return frame
