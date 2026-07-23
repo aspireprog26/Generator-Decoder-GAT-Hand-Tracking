@@ -20,8 +20,8 @@ class GraphAttentionNet(nn.Module):
         self.elu = nn.ELU()
 
     def forward(self, features, edge_index, batch):
-        features = self.gat1(features, edge_index)
-        features = self.gat2(features, edge_index)
+        features = self.elu(self.gat1(features, edge_index))
+        features = self.elu(self.gat2(features, edge_index))
         batch_size = batch.max().item() + 1
         features = features.view(batch_size, -1)  # (B, 21, hidden) -> (B, 21 * hidden)
         return features
@@ -70,9 +70,8 @@ class AnatomyModel(nn.Module):
 
         if self.generator:
             mean_mat = out[:, :63]
-            row_scale = self.softplus(out[:, 63])
-            col_scale = self.softplus(out[:, 64])
+            scale = self.softplus(out[:, 63])
 
-            return mean_mat, row_scale, col_scale
+            return mean_mat, scale
         else:
             return out

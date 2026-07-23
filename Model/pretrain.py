@@ -19,9 +19,9 @@ configs = {
     "decoder_hidden_size": 32,
     "generator_hidden_size": 64,
     "decoder_output_size": 3,
-    "generator_output_size": 65,
+    "generator_output_size": 64,
     "num_workers": 2,
-    "num_epochs": 250,
+    "num_epochs": 100,
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
@@ -34,6 +34,8 @@ configs = {
     "scheduler_patience": 5,
     "drop_last": False,
 }
+
+log2pi = torch.log(torch.tensor(2 * torch.pi))
 
 
 def saveConfigs():
@@ -54,7 +56,23 @@ def collateGenerator(batch):
     return (batch, targets, raw_coords)
 
 
-criterion = nn.MSELoss()
+def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
+    B, m, n = X.shape
+
+    cov_row = scale[:, None, None] * U
+    E = X - M
+
+    logdet_U = torch.linalg.slogdet(cov_row).logabsdet
+    Uinv = torch.linalg.inv(cov_row)
+
+    quad = torch.einsum("bij,bjk,bkl,bli->b", Uinv, E, Vinv, E.transpose(-1, -2))
+    nll = 0.5 * (m * n * log2pi.to(device) + n * logdet_U + m * logdet_V + quad)
+    return nll.mean()
+
+
+decoder_criterion = nn.MSELoss()
+generator_criterion = generatorCriterion
+
 decoder_train_dataset = torch.load(
     Path(configs["data_dir"]) / "Training" / "dataset.pt", weights_only=False
 )
@@ -169,7 +187,8 @@ def train(cfgs: dict, trial=None):
 
     trainer = Trainer(
         cfgs,
-        criterion,
+        decoder_criterion,
+        generator_criterion,
         decoder_model,
         generator_model,
         decoder_train_loader,
@@ -181,8 +200,8 @@ def train(cfgs: dict, trial=None):
         decoder_scheduler,
         generator_scheduler,
     )
-    val_loss = trainer.train(trial)
-    return val_loss
+    train_loss, val_loss = trainer.train(trial)
+    return train_loss, val_loss
 
 
 def objective(trial):

@@ -1,4 +1,3 @@
-import sys
 import json
 import torch
 from pathlib import Path
@@ -6,19 +5,24 @@ from torch.nn import MSELoss
 from model import AnatomyModel
 from torch_geometric.data import Batch
 from torch.utils.data import DataLoader
-
-sys.path.insert(0, "/home/mrtcloud-1/Documents/Hand-Tracking-2/Dataset")
-from optimizedataset import DatasetOptimizer
+from pretrain import generator_criterion as gc
+from pretrainer import Trainer
 
 with open(
     "/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Model/configs.json", "r"
 ) as f:
     configs = json.load(f)
 
-chol_row = torch.load(Path(configs["post_data_dir"]) / "cholrow.pt")
-chol_col = torch.load(Path(configs["post_data_dir"]) / "cholcol.pt")
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Set seed for eval sampling reproducability
+SEED = 42
+torch.manual_seed(SEED)
+
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+
 decoder_model = AnatomyModel(
     configs["input_size"],
     configs["decoder_hidden_size"],
@@ -87,16 +91,35 @@ generator_test_loader = DataLoader(
     drop_last=configs["drop_last"],
     collate_fn=collateGenerator,
 )
-features = DatasetOptimizer(mp=False).getFeatures
-criterion = MSELoss()
+
+features = Trainer().getFeatures
+decoder_criterion = MSELoss()
+generator_criterion = gc
+
+chol_row = torch.load(
+    Path(configs["post_data_dir"]) / "cholrow.pt",
+    weights_only=False,
+).to(device)
+
+chol_col = torch.load(
+    Path(configs["post_data_dir"]) / "cholcol.pt",
+    weights_only=False,
+).to(device)
+
+cov_row = chol_row @ chol_row.T
+cov_col = chol_col @ chol_col.T
+
+col_inv = torch.linalg.inv(cov_col)
+logdet_col = torch.linalg.slogdet(cov_col).logabsdet
 
 
 def evalModel():
     decoder_test_loss = 0
     generator_test_loss = 0
+    dec_samples = 0
     gen_samples = 0
 
-    # Decoder
+    # Decoder Validation
     with torch.inference_mode():
         for decoder_batch in decoder_test_loader:
             decoder_batch = decoder_batch.to(device)
@@ -104,56 +127,56 @@ def evalModel():
             decoder_edge_index = decoder_batch.edge_index
             decoder_b = decoder_batch.batch
 
-            normalized_coords, _, _ = features(
-                decoder_coords.detach().cpu().numpy(), None, True
-            )  # Original 3D normalized features
-            normalized_coords = torch.tensor(normalized_coords).to(device)
-
-            with torch.inference_mode():
-                mean_mat, scale_col, scale_row = generator_model(
-                    normalized_coords, decoder_edge_index, decoder_b
-                )
-                mean_mat = mean_mat.reshape(21, 3)
-                Z = torch.rand_like(mean_mat)
-                noise = mean_mat + torch.sqrt(scale_col * scale_row) * (
-                    chol_row @ Z @ chol_col.T
-                )
-
-                normalized_coords, coords_proj, scale = features(
-                    decoder_coords.detach().cpu().numpy(), noise, True
-                )  # Distorted 3D normalized features with noise
-                normalized_coords = torch.as_tensor(
-                    normalized_coords, dtype=torch.float32, device=device
-                )
-                coords_proj = torch.as_tensor(
-                    coords_proj, dtype=torch.float32, device=device
-                )
-                scale = torch.as_tensor(scale, dtype=torch.float32, device=device)
-
-                errors = decoder_model(normalized_coords, decoder_edge_index, decoder_b)
-                pred_coords = coords_proj + (scale * errors)
-                decoder_loss = criterion(pred_coords, decoder_coords)
-                decoder_test_loss += decoder_loss.item()
-    decoder_test_loss /= len(decoder_test_loader)
-
-    # Generator
-    with torch.inference_mode():
-        for generator_batch, gen_targets, gen_raw in generator_test_loader:
-            generator_features = generator_batch.x.float()
-            generator_edge_index = generator_batch.edge_index
-            generator_b = generator_batch.batch
-
-            gen_scale = torch.linalg.norm(gen_targets[:, 9] - gen_targets[:, 0])
-            true_errors = (gen_targets - gen_raw) / gen_scale
-
-            pred_errors = generator_model(
-                generator_features, generator_edge_index, generator_b
+            normalized_coords, _, _ = features(decoder_coords, None, True)
+            mean_mat, scale = generator_model(
+                normalized_coords, decoder_edge_index, decoder_b
             )
-            generator_loss = criterion(pred_errors, true_errors)
-            batch_size = gen_targets.size(0)
-            generator_test_loss += generator_loss.item() * batch_size
-            gen_samples += batch_size
-    generator_test_loss /= gen_samples
+            mean_mat = mean_mat.reshape(decoder_batch.num_graphs, 21, 3)
+            Z = torch.randn_like(mean_mat)
+            noise = mean_mat + torch.sqrt(scale)[:, None, None] * (
+                chol_row @ Z @ chol_col.T
+            )
+
+            normalized_coords, coords_proj, scale = features(
+                decoder_coords, noise, True
+            )
+            errors = decoder_model(normalized_coords, decoder_edge_index, decoder_b)
+            pred_coords = coords_proj + (scale * errors)
+            decoder_loss = decoder_criterion(pred_coords, decoder_coords)
+            decoder_test_loss += decoder_loss.item() * decoder_batch.num_graphs
+            dec_samples += decoder_batch.num_graphs
+        decoder_test_loss /= dec_samples
+
+        # Generator Validation
+        with torch.inference_mode():
+            for generator_batch, gen_targets, gen_raw in generator_test_loader:
+                generator_features = generator_batch.x.float()
+                generator_edge_index = generator_batch.edge_index
+                generator_b = generator_batch.batch
+
+                gen_scale = torch.linalg.norm(
+                    gen_targets[:, 9] - gen_targets[:, 0], dim=1
+                )
+                true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+
+                mean_mat, scale = generator_model(
+                    generator_features, generator_edge_index, generator_b
+                )
+                mean_mat = mean_mat.reshape(generator_batch.num_graphs, 21, 3)
+                generator_loss = generator_criterion(
+                    true_errors,
+                    mean_mat,
+                    scale,
+                    cov_row,
+                    col_inv,
+                    logdet_col,
+                    device,
+                )
+                generator_test_loss += (
+                    generator_loss.item() * generator_batch.num_graphs
+                )
+                gen_samples += generator_batch.num_graphs
+        generator_test_loss /= gen_samples
 
     return decoder_test_loss, generator_test_loss
 
