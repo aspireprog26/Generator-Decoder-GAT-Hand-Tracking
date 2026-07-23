@@ -1,5 +1,7 @@
 optuna
-torch torchvision torchaudio
+torch
+torchvision
+torchaudio
 torch_geometric
 opencv-python
 numpy
