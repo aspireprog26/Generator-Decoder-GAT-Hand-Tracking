@@ -92,7 +92,7 @@ generator_test_loader = DataLoader(
     collate_fn=collateGenerator,
 )
 
-features = Trainer().getFeatures
+features = Trainer().features
 decoder_criterion = MSELoss()
 generator_criterion = gc
 

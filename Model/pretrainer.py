@@ -66,7 +66,7 @@ class Trainer:
         self.col_inv = torch.linalg.inv(cov_col)
         self.logdet_col = torch.linalg.slogdet(cov_col).logabsdet
 
-    def getFeatures(
+    def features(
         self,
         c: torch.Tensor,
         n: Optional[torch.Tensor],
