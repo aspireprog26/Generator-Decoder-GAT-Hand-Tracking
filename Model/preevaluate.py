@@ -119,19 +119,21 @@ def evalModel():
     dec_samples = 0
     gen_samples = 0
 
-    # Decoder Validation
+    # Decoder Testing
     with torch.inference_mode():
         for decoder_batch in decoder_test_loader:
             decoder_batch = decoder_batch.to(device)
-            decoder_coords = decoder_batch.x.float()
-            decoder_edge_index = decoder_batch.edge_index
-            decoder_b = decoder_batch.batch
+            decoder_coords = decoder_batch.x.to(device, dtype=torch.float32).view(
+                decoder_batch.num_graphs, 21, 3
+            )
+            decoder_edge_index = decoder_batch.edge_index.to(device)
+            decoder_b = decoder_batch.batch.to(device)
 
             normalized_coords, _, _ = features(decoder_coords, None)
             mean_mat, scale = generator_model(
                 normalized_coords, decoder_edge_index, decoder_b
             )
-            mean_mat = mean_mat.reshape(decoder_batch.num_graphs, 21, 3)
+            mean_mat = mean_mat.reshape(mean_mat.size(0), 21, 3)
             Z = torch.randn_like(mean_mat)
             noise = mean_mat + torch.sqrt(scale)[:, None, None] * (
                 chol_row @ Z @ chol_col.T
@@ -139,42 +141,44 @@ def evalModel():
 
             normalized_coords, coords_proj, scale = features(decoder_coords, noise)
             errors = decoder_model(normalized_coords, decoder_edge_index, decoder_b)
-            pred_coords = coords_proj + (scale * errors)
+            errors = errors.view(errors.size(0), 21, 3)
+            pred_coords = coords_proj + (scale[:, None, None] * errors)
+
             decoder_loss = decoder_criterion(pred_coords, decoder_coords)
             decoder_test_loss += decoder_loss.item() * decoder_batch.num_graphs
             dec_samples += decoder_batch.num_graphs
-        decoder_test_loss /= dec_samples
+    decoder_test_loss /= dec_samples
 
-        # Generator Validation
-        with torch.inference_mode():
-            for generator_batch, gen_targets, gen_raw in generator_test_loader:
-                generator_features = generator_batch.x.float()
-                generator_edge_index = generator_batch.edge_index
-                generator_b = generator_batch.batch
+    # Generator Testing
+    with torch.inference_mode():
+        for generator_batch, gen_targets, gen_raw in generator_test_loader:
+            generator_batch = generator_batch.to(device)
+            gen_targets = gen_targets.to(device)
+            gen_raw = gen_raw.to(device)
 
-                gen_scale = torch.linalg.norm(
-                    gen_targets[:, 9] - gen_targets[:, 0], dim=1
-                )
-                true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+            generator_features = generator_batch.x.to(device, dtype=torch.float32)
+            generator_edge_index = generator_batch.edge_index.to(device)
+            generator_b = generator_batch.batch.to(device)
 
-                mean_mat, scale = generator_model(
-                    generator_features, generator_edge_index, generator_b
-                )
-                mean_mat = mean_mat.reshape(generator_batch.num_graphs, 21, 3)
-                generator_loss = generator_criterion(
-                    true_errors,
-                    mean_mat,
-                    scale,
-                    cov_row,
-                    col_inv,
-                    logdet_col,
-                    device,
-                )
-                generator_test_loss += (
-                    generator_loss.item() * generator_batch.num_graphs
-                )
-                gen_samples += generator_batch.num_graphs
-        generator_test_loss /= gen_samples
+            gen_scale = torch.linalg.norm(gen_targets[:, 9] - gen_targets[:, 0], dim=1)
+            true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+
+            mean_mat, scale = generator_model(
+                generator_features, generator_edge_index, generator_b
+            )
+            mean_mat = mean_mat.reshape(mean_mat.size(0), 21, 3)
+            generator_loss = generator_criterion(
+                true_errors,
+                mean_mat,
+                scale,
+                cov_row,
+                col_inv,
+                logdet_col,
+                device,
+            )
+            generator_test_loss += generator_loss.item() * generator_batch.num_graphs
+            gen_samples += generator_batch.num_graphs
+    generator_test_loss /= gen_samples
 
     return decoder_test_loss, generator_test_loss
 

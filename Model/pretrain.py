@@ -18,7 +18,7 @@ configs = {
     "input_size": 7,
     "decoder_hidden_size": 32,
     "generator_hidden_size": 64,
-    "decoder_output_size": 3,
+    "decoder_output_size": 63,
     "generator_output_size": 64,
     "num_workers": 2,
     "num_epochs": 100,
@@ -57,16 +57,25 @@ def collateGenerator(batch):
 
 
 def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
-    B, m, n = X.shape
+    dtype = X.dtype
 
+    X = X.to(device=device, dtype=dtype)
+    M = M.to(device=device, dtype=dtype)
+    scale = scale.to(device=device, dtype=dtype)
+    U = U.to(device=device, dtype=dtype)
+    Vinv = Vinv.to(device=device, dtype=dtype)
+    logdet_V = torch.as_tensor(logdet_V, device=device, dtype=dtype)
+    log2pi_ = log2pi.to(device=device, dtype=dtype)
+
+    B, m, n = X.shape
     cov_row = scale[:, None, None] * U
     E = X - M
 
     logdet_U = torch.linalg.slogdet(cov_row).logabsdet
     Uinv = torch.linalg.inv(cov_row)
 
-    quad = torch.einsum("bij,bjk,bkl,bli->b", Uinv, E, Vinv, E.transpose(-1, -2))
-    nll = 0.5 * (m * n * log2pi.to(device) + n * logdet_U + m * logdet_V + quad)
+    quad = torch.einsum("bij,bjk,kl,bli->b", Uinv, E, Vinv, E.transpose(-1, -2))
+    nll = 0.5 * (m * n * log2pi_ + n * logdet_U + m * logdet_V + quad)
     return nll.mean()
 
 
@@ -216,7 +225,7 @@ def objective(trial):
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
     scheduler_factor = trial.suggest_float("scheduler_factor", 0.2, 0.7)
     scheduler_patience = trial.suggest_int("scheduler_patience", 5, 10)
-    num_epochs = trial.suggest_int("num_epochs", 30, 100, step=10)
+    num_epochs = trial.suggest_int("num_epochs", 30, 80, step=5)
 
     trial_configs.update(
         {
@@ -245,7 +254,7 @@ study = optuna.create_study(
     direction="minimize",
     pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=20),
 )
-study.optimize(objective, n_trials=25)
+study.optimize(objective, n_trials=50)
 
 print(f"Best loss: {study.best_value}")
 print("\nBest parameters:")

@@ -50,8 +50,8 @@ class Trainer:
 
                 self.optimizer.zero_grad()
                 error = self.model(features, edge_index, b)
-                scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0])
-                pred = coords_proj + (scale * error)
+                scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
+                pred = coords_proj + (scale[:, None, None] * error)
                 loss = self.criterion(pred, target)
 
                 loss.backward()
@@ -73,8 +73,10 @@ class Trainer:
                     b = batch.batch
 
                     error = self.model(features, edge_index, b)
-                    scale = torch.linalg.norm(coords_proj[9] - coords_proj[0])
-                    pred = coords_proj + (scale * error)
+                    scale = torch.linalg.norm(
+                        coords_proj[:, 9] - coords_proj[:, 0], dim=1
+                    )
+                    pred = coords_proj + (scale[:, None, None] * error)
 
                     loss = self.criterion(pred, target)
                     val_loss += loss.item()

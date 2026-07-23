@@ -18,11 +18,11 @@ def nmse(prediction, target):
 
 
 def collate(batch):
-    graphs, targets, raw_coords = zip(*batch)
+    graphs, targets, coords_proj = zip(*batch)
     batch = Batch.from_data_list(list(graphs))
     targets = torch.stack(targets, dim=0).float()
-    raw_coords = torch.stack(raw_coords, dim=0).float()
-    return (batch, targets, raw_coords)
+    coords_proj = torch.stack(coords_proj, dim=0).float()
+    return (batch, targets, coords_proj)
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -60,18 +60,18 @@ def evalModel():
 
     criterion = nn.MSELoss()
     with torch.inference_mode():
-        for batch, target, raw_coords in test_loader:
+        for batch, target, coords_proj in test_loader:
             batch = batch.to(device)
             target = target.to(device)
-            raw_coords = raw_coords.to(device)
+            coords_proj = coords_proj.to(device)
 
             features = batch.x
             edge_index = batch.edge_index
             b = batch.batch
 
             error = model(features, edge_index, b)
-            scale = torch.linalg.norm(raw_coords[:, 9] - raw_coords[:, 0])
-            pred = raw_coords + (scale * error)
+            scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
+            pred = coords_proj + (scale[:, None, None] * error)
             loss = criterion(pred, target)
 
             test_mse_loss += loss.item()

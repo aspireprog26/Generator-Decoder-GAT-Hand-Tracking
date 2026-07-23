@@ -1,4 +1,5 @@
 import math
+import torch
 import torch.nn as nn
 from torch_geometric.nn import GATConv
 
@@ -20,6 +21,9 @@ class GraphAttentionNet(nn.Module):
         self.elu = nn.ELU()
 
     def forward(self, features, edge_index, batch):
+        if features.dim() == 3:
+            features = features.flatten(0, 1)
+
         features = self.elu(self.gat1(features, edge_index))
         features = self.elu(self.gat2(features, edge_index))
         batch_size = batch.max().item() + 1
@@ -64,13 +68,18 @@ class AnatomyModel(nn.Module):
         self.softplus = nn.Softplus()
         self.generator = generator
 
+        if self.generator:
+            with torch.no_grad():
+                # Encourages scale to start near 1 since softplus^-1(-1) = 0.5413
+                self.regressor.out.bias[63] = 0.5413
+
     def forward(self, features, edge_index, batch):
         gat = self.gat(features, edge_index, batch)
         out = self.regressor(gat)
 
         if self.generator:
             mean_mat = out[:, :63]
-            scale = self.softplus(out[:, 63])
+            scale = self.softplus(out[:, 63]) + 1e-3
 
             return mean_mat, scale
         else:

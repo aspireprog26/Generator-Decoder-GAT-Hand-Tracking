@@ -52,12 +52,12 @@ class Trainer:
         self.chol_row = torch.load(
             Path(configs["post_data_dir"]) / "cholrow.pt",
             weights_only=False,
-        ).to(self.device)
+        ).to(self.device, dtype=torch.float32)
 
         self.chol_col = torch.load(
             Path(configs["post_data_dir"]) / "cholcol.pt",
             weights_only=False,
-        ).to(self.device)
+        ).to(self.device, dtype=torch.float32)
 
         self.cov_row = self.chol_row @ self.chol_row.T
         cov_col = self.chol_col @ self.chol_col.T
@@ -65,55 +65,49 @@ class Trainer:
         self.col_inv = torch.linalg.inv(cov_col)
         self.logdet_col = torch.linalg.slogdet(cov_col).logabsdet
 
-    def features(
-        self,
-        c: torch.Tensor,
-        n: torch.Tensor,
-        eps: float = 1e-8,
-    ):
-
-        mcp_idx = torch.tensor([1, 5, 9, 13, 17], device=c.device)
-        pip_idx = torch.tensor([2, 6, 10, 14, 18], device=c.device)
-        dip_idx = torch.tensor([3, 7, 11, 15, 19], device=c.device)
-        tip_idx = torch.tensor([4, 8, 12, 16, 20], device=c.device)
-
-        coords = c.to(dtype=torch.float32)
-        noise = None if n is None else n.to(device=coords.device, dtype=coords.dtype)
-
-        # Batched version
-        scale0 = torch.linalg.norm(coords[:, 9] - coords[:, 0], dim=-1)  # (B,)
-        coords_proj = (
-            coords - scale0[:, None, None] * noise if noise is not None else coords
+        next_idx = [0]
+        for finger in range(5):
+            pip = 2 + 4 * finger
+            dip = 3 + 4 * finger
+            tip = 4 + 4 * finger
+            next_idx += [pip, dip, tip, tip]
+        self.next_joint_idx = torch.tensor(
+            next_idx, dtype=torch.long, device=self.device
         )
 
-        scale = torch.linalg.norm(
-            coords_proj[:, 9] - coords_proj[:, 0], dim=-1
-        ).clamp_min(eps)  # (B,)
-
-        coords_proj_norm = (coords_proj - coords_proj[:, 0:1, :]) / scale[:, None, None]
-        unit_vecs = coords_proj / torch.linalg.norm(
-            coords_proj, dim=-1, keepdim=True
-        ).clamp_min(eps)
-
+    def getFeatures(self, coords: torch.Tensor, eps: float = 1e-8):
+        coords = coords.float()
         B = coords.shape[0]
-        lengths = torch.zeros((B, 21, 1), device=coords.device, dtype=coords.dtype)
 
-        lengths[:, mcp_idx, 0] = (
-            torch.linalg.norm(coords_proj[:, pip_idx] - coords_proj[:, mcp_idx], dim=-1)
-            / scale
-        )
-        lengths[:, pip_idx, 0] = (
-            torch.linalg.norm(coords_proj[:, dip_idx] - coords_proj[:, pip_idx], dim=-1)
-            / scale
-        )
-        lengths[:, dip_idx, 0] = (
-            torch.linalg.norm(coords_proj[:, tip_idx] - coords_proj[:, dip_idx], dim=-1)
-            / scale
-        )
+        wrist = coords[:, 0:1, :]  # (B, 1, 3)
+        scale = torch.linalg.norm(coords[:, 9] - coords[:, 0], dim=-1).clamp_min(
+            eps
+        )  # (B,)
+
+        coords_norm = (coords - wrist) / scale[:, None, None]  # (B, 21, 3)
+
+        joint_norms = torch.linalg.norm(coords, dim=-1).clamp_min(eps)  # (B, 21)
+        dir_vectors = coords / joint_norms[..., None]  # (B, 21, 3)
+
+        next_coords = coords[:, self.next_joint_idx, :]  # (B, 21, 3)
+        dist_to_next = (
+            torch.linalg.norm(next_coords - coords, dim=-1) / scale[:, None]
+        )  # (B, 21)
 
         features = torch.cat(
-            [coords_proj_norm, unit_vecs, lengths], dim=-1
+            [coords_norm, dir_vectors, dist_to_next.unsqueeze(-1)], dim=-1
         )  # (B, 21, 7)
+
+        return features
+
+    def features(self, coords, noise=None, eps=1e-8):
+        coords = coords.float()
+        scale = torch.linalg.norm(coords[:, 9] - coords[:, 0], dim=-1).clamp_min(eps)
+        coords_proj = (
+            (coords - scale[:, None, None] * noise) if noise is not None else coords
+        )
+        features = self.getFeatures(coords_proj, eps)
+
         return features, coords_proj, scale
 
     def train(self, trial=None):
@@ -136,9 +130,9 @@ class Trainer:
                 gen_raw = gen_raw.to(self.device)
 
                 # Start generator training
-                generator_features = gen_batch.x.float()
-                generator_edge_index = gen_batch.edge_index
-                generator_b = gen_batch.batch
+                generator_features = gen_batch.x.to(self.device, dtype=torch.float32)
+                generator_edge_index = gen_batch.edge_index.to(self.device)
+                generator_b = gen_batch.batch.to(self.device)
 
                 self.generator_optimizer.zero_grad()
 
@@ -150,7 +144,7 @@ class Trainer:
                 mean_mat, scale = self.generator_model(
                     generator_features, generator_edge_index, generator_b
                 )
-                mean_mat = mean_mat.reshape(gen_batch.num_graphs, 21, 3)
+                mean_mat = mean_mat.reshape(mean_mat.size(0), 21, 3)
                 generator_loss = self.generator_criterion(
                     true_errors,
                     mean_mat,
@@ -162,15 +156,20 @@ class Trainer:
                 )
 
                 generator_loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.generator_model.parameters(), max_norm=1.0
+                )
                 self.generator_optimizer.step()
 
                 generator_train_loss += generator_loss.item() * gen_batch.num_graphs
                 gen_samples += gen_batch.num_graphs
 
                 # Start decoder training
-                decoder_coords = decoder_batch.x.float()
-                decoder_edge_index = decoder_batch.edge_index
-                decoder_b = decoder_batch.batch
+                decoder_coords = decoder_batch.x.to(
+                    self.device, dtype=torch.float32
+                ).view(decoder_batch.num_graphs, 21, 3)
+                decoder_edge_index = decoder_batch.edge_index.to(self.device)
+                decoder_b = decoder_batch.batch.to(self.device)
 
                 self.decoder_optimizer.zero_grad()
                 normalized_coords, _, _ = self.features(
@@ -182,7 +181,7 @@ class Trainer:
                     mean_mat, scale = self.generator_model(
                         normalized_coords, decoder_edge_index, decoder_b
                     )
-                    mean_mat = mean_mat.reshape(decoder_batch.num_graphs, 21, 3)
+                    mean_mat = mean_mat.reshape(mean_mat.size(0), 21, 3)
                     Z = torch.randn_like(mean_mat)
                     noise = mean_mat + torch.sqrt(scale)[:, None, None] * (
                         self.chol_row @ Z @ self.chol_col.T
@@ -196,7 +195,8 @@ class Trainer:
                     normalized_coords, decoder_edge_index, decoder_b
                 )
 
-                pred_coords = coords_proj + (scale * errors)
+                errors = errors.view(errors.size(0), 21, 3)
+                pred_coords = coords_proj + (scale[:, None, None] * errors)
                 decoder_loss = self.decoder_criterion(pred_coords, decoder_coords)
 
                 decoder_loss.backward()
@@ -219,15 +219,17 @@ class Trainer:
             with torch.inference_mode():
                 for decoder_batch in self.decoder_val_loader:
                     decoder_batch = decoder_batch.to(self.device)
-                    decoder_coords = decoder_batch.x.float()
-                    decoder_edge_index = decoder_batch.edge_index
-                    decoder_b = decoder_batch.batch
+                    decoder_coords = decoder_batch.x.to(
+                        self.device, dtype=torch.float32
+                    ).view(decoder_batch.num_graphs, 21, 3)
+                    decoder_edge_index = decoder_batch.edge_index.to(self.device)
+                    decoder_b = decoder_batch.batch.to(self.device)
 
                     normalized_coords, _, _ = self.features(decoder_coords, None)
                     mean_mat, scale = self.generator_model(
                         normalized_coords, decoder_edge_index, decoder_b
                     )
-                    mean_mat = mean_mat.reshape(decoder_batch.num_graphs, 21, 3)
+                    mean_mat = mean_mat.reshape(mean_mat.size(0), 21, 3)
                     Z = torch.randn_like(mean_mat)
                     noise = mean_mat + torch.sqrt(scale)[:, None, None] * (
                         self.chol_row @ Z @ self.chol_col.T
@@ -239,7 +241,9 @@ class Trainer:
                     errors = self.decoder_model(
                         normalized_coords, decoder_edge_index, decoder_b
                     )
-                    pred_coords = coords_proj + (scale * errors)
+                    errors = errors.view(errors.size(0), 21, 3)
+                    pred_coords = coords_proj + (scale[:, None, None] * errors)
+
                     decoder_loss = self.decoder_criterion(pred_coords, decoder_coords)
                     decoder_val_loss += decoder_loss.item() * decoder_batch.num_graphs
                     dec_samples += decoder_batch.num_graphs
@@ -248,9 +252,15 @@ class Trainer:
             # Generator Validation
             with torch.inference_mode():
                 for generator_batch, gen_targets, gen_raw in self.generator_val_loader:
-                    generator_features = generator_batch.x.float()
-                    generator_edge_index = generator_batch.edge_index
-                    generator_b = generator_batch.batch
+                    generator_batch = generator_batch.to(self.device)
+                    gen_targets = gen_targets.to(self.device)
+                    gen_raw = gen_raw.to(self.device)
+
+                    generator_features = generator_batch.x.to(
+                        self.device, dtype=torch.float32
+                    )
+                    generator_edge_index = generator_batch.edge_index.to(self.device)
+                    generator_b = generator_batch.batch.to(self.device)
 
                     gen_scale = torch.linalg.norm(
                         gen_targets[:, 9] - gen_targets[:, 0], dim=1
@@ -260,7 +270,7 @@ class Trainer:
                     mean_mat, scale = self.generator_model(
                         generator_features, generator_edge_index, generator_b
                     )
-                    mean_mat = mean_mat.reshape(generator_batch.num_graphs, 21, 3)
+                    mean_mat = mean_mat.reshape(mean_mat.size(0), 21, 3)
                     generator_loss = self.generator_criterion(
                         true_errors,
                         mean_mat,
