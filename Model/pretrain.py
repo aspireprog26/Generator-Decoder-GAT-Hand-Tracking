@@ -216,6 +216,7 @@ def objective(trial):
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
     scheduler_factor = trial.suggest_float("scheduler_factor", 0.2, 0.7)
     scheduler_patience = trial.suggest_int("scheduler_patience", 5, 10)
+    num_epochs = trial.suggest_int("num_epochs", 30, 100, step=10)
 
     trial_configs.update(
         {
@@ -229,6 +230,7 @@ def objective(trial):
             "batch_size": batch_size,
             "scheduler_factor": scheduler_factor,
             "scheduler_patience": scheduler_patience,
+            "num_epochs": num_epochs,
         }
     )
 

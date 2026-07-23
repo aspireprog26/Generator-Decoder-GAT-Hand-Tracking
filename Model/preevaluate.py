@@ -127,7 +127,7 @@ def evalModel():
             decoder_edge_index = decoder_batch.edge_index
             decoder_b = decoder_batch.batch
 
-            normalized_coords, _, _ = features(decoder_coords, None, True)
+            normalized_coords, _, _ = features(decoder_coords, None)
             mean_mat, scale = generator_model(
                 normalized_coords, decoder_edge_index, decoder_b
             )
@@ -137,9 +137,7 @@ def evalModel():
                 chol_row @ Z @ chol_col.T
             )
 
-            normalized_coords, coords_proj, scale = features(
-                decoder_coords, noise, True
-            )
+            normalized_coords, coords_proj, scale = features(decoder_coords, noise)
             errors = decoder_model(normalized_coords, decoder_edge_index, decoder_b)
             pred_coords = coords_proj + (scale * errors)
             decoder_loss = decoder_criterion(pred_coords, decoder_coords)

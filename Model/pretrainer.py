@@ -1,6 +1,5 @@
 import torch
 import optuna
-from typing import Optional
 import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
@@ -69,8 +68,7 @@ class Trainer:
     def features(
         self,
         c: torch.Tensor,
-        n: Optional[torch.Tensor],
-        batch: bool = False,
+        n: torch.Tensor,
         eps: float = 1e-8,
     ):
 
@@ -78,50 +76,6 @@ class Trainer:
         pip_idx = torch.tensor([2, 6, 10, 14, 18], device=c.device)
         dip_idx = torch.tensor([3, 7, 11, 15, 19], device=c.device)
         tip_idx = torch.tensor([4, 8, 12, 16, 20], device=c.device)
-
-        def _one(coords: torch.Tensor, noise: Optional[torch.Tensor]):
-            coords = coords.to(dtype=torch.float32)
-
-            if noise is not None:
-                noise = noise.to(device=coords.device, dtype=coords.dtype)
-
-            # Original scale used before projection
-            scale0 = torch.linalg.norm(coords[9] - coords[0])
-
-            coords_proj = coords - scale0 * noise if noise is not None else coords
-            scale = torch.linalg.norm(coords_proj[9] - coords_proj[0]).clamp_min(eps)
-
-            # 3 normalized xyz features
-            coords_proj_norm = (coords_proj - coords_proj[0]) / scale
-
-            # 3 unit-vector features + 1 length feature per node
-            unit_vecs = coords_proj / torch.linalg.norm(
-                coords_proj, dim=-1, keepdim=True
-            ).clamp_min(eps)
-
-            lengths = torch.zeros((21, 1), device=coords.device, dtype=coords.dtype)
-
-            lengths[mcp_idx, 0] = (
-                torch.linalg.norm(coords_proj[pip_idx] - coords_proj[mcp_idx], dim=-1)
-                / scale
-            )
-            lengths[pip_idx, 0] = (
-                torch.linalg.norm(coords_proj[dip_idx] - coords_proj[pip_idx], dim=-1)
-                / scale
-            )
-            lengths[dip_idx, 0] = (
-                torch.linalg.norm(coords_proj[tip_idx] - coords_proj[dip_idx], dim=-1)
-                / scale
-            )
-            # wrist and tips stay at 0
-
-            features = torch.cat(
-                [coords_proj_norm, unit_vecs, lengths], dim=-1
-            )  # (21, 7)
-            return features, coords_proj, scale
-
-        if not batch:
-            return _one(c, n)
 
         coords = c.to(dtype=torch.float32)
         noise = None if n is None else n.to(device=coords.device, dtype=coords.dtype)
@@ -220,7 +174,7 @@ class Trainer:
 
                 self.decoder_optimizer.zero_grad()
                 normalized_coords, _, _ = self.features(
-                    decoder_coords, None, True
+                    decoder_coords, None
                 )  # Original 3D normalized features
 
                 # Generate noise matrix and scales
@@ -235,7 +189,7 @@ class Trainer:
                     )
 
                 normalized_coords, coords_proj, scale = self.features(
-                    decoder_coords, noise, True
+                    decoder_coords, noise
                 )  # Distorted 3D normalized features with noise
 
                 errors = self.decoder_model(
@@ -269,7 +223,7 @@ class Trainer:
                     decoder_edge_index = decoder_batch.edge_index
                     decoder_b = decoder_batch.batch
 
-                    normalized_coords, _, _ = self.features(decoder_coords, None, True)
+                    normalized_coords, _, _ = self.features(decoder_coords, None)
                     mean_mat, scale = self.generator_model(
                         normalized_coords, decoder_edge_index, decoder_b
                     )
@@ -280,7 +234,7 @@ class Trainer:
                     )
 
                     normalized_coords, coords_proj, scale = self.features(
-                        decoder_coords, noise, True
+                        decoder_coords, noise
                     )
                     errors = self.decoder_model(
                         normalized_coords, decoder_edge_index, decoder_b

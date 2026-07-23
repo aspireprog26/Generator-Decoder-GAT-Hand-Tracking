@@ -31,6 +31,7 @@ class DatasetOptimizer:
             "/home/mrtcloud-1/Documents/Hand-Tracking-2/Stereo/stereo.yml",
             cv2.FILE_STORAGE_READ,
         )
+
         self.P1 = fs.getNode("P1").mat()
         self.P2 = fs.getNode("P2").mat()
         self.K1 = fs.getNode("K1").mat()
@@ -60,6 +61,7 @@ class DatasetOptimizer:
         points4D = cv2.triangulatePoints(
             self.P1, self.P2, pts_left_rect.T, pts_right_rect.T
         )
+
         points3D = (points4D[:3] / points4D[3]).T * 100
         points3D = np.squeeze(points3D)
 
