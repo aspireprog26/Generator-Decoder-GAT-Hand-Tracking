@@ -3,7 +3,7 @@ import numpy as np
 
 
 class EarlyStopping:
-    def __init__(self, patience, min_delta, path):
+    def __init__(self, patience: int, min_delta: float, path: str):
         self.patience = patience
         self.min_delta = min_delta
         self.path = path

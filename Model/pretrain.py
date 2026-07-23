@@ -254,4 +254,4 @@ for key, value in study.best_params.items():
 
 configs.update(study.best_params)
 saveConfigs()
-train(configs, trial=None)
+train(configs)

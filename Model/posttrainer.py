@@ -91,5 +91,3 @@ class Trainer:
             if self.early_stopper.stopping:
                 print(f"Early Stopping at epoch {epoch + 1} / {self.num_epochs}")
                 break
-
-        return val_loss
