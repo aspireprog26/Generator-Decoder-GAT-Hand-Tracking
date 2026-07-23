@@ -7,7 +7,7 @@ opencv-python
 numpy
 scipy
 pathlib
-itertools
+more-itertools
 mediapipe
 json
 math
