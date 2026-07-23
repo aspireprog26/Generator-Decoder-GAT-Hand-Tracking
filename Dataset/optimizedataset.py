@@ -119,18 +119,15 @@ class DatasetOptimizer:
         )  # Turns into shape (1500, 21, 3)
         return coords_transposed[frame, ...]  # Returns shape (21, 3)
 
-    def getFeatures(self, coords: np.ndarray, noise=None):
+    def getFeatures(self, coords: np.ndarray):
         scale = np.linalg.norm(coords[9] - coords[0])
-        coords_proj = (coords - (scale * noise)) if noise is not None else coords
-        scale = np.linalg.norm(coords_proj[9] - coords_proj[0])
+        coords_norm = (coords - coords[0]) / scale
 
-        coords_proj_norm = (coords_proj - coords_proj[0]) / scale
-
-        wrist_unit = coords_proj[0] / np.linalg.norm(coords_proj[0])
+        wrist_unit = coords[0] / np.linalg.norm(coords[0])
         wrist_node_length = 0
         wrist_vec = np.append(wrist_unit, wrist_node_length)
 
-        coords_normalized = coords_proj_norm.tolist()
+        coords_normalized = coords_norm.tolist()
         coords_normalized[0].extend(wrist_vec.tolist())
 
         for finger in range(5):
@@ -139,25 +136,19 @@ class DatasetOptimizer:
             DIP = 3 + 4 * finger
             TIP = 4 + 4 * finger
 
-            mcp_unit = coords_proj[MCP] / np.linalg.norm(coords_proj[MCP])
-            mcp_node_length = (
-                np.linalg.norm(coords_proj[PIP] - coords_proj[MCP]) / scale
-            )
+            mcp_unit = coords[MCP] / np.linalg.norm(coords[MCP])
+            mcp_node_length = np.linalg.norm(coords[PIP] - coords[MCP]) / scale
             mcp_vec = np.append(mcp_unit, mcp_node_length)
 
-            pip_unit = coords_proj[PIP] / np.linalg.norm(coords_proj[PIP])
-            pip_node_length = (
-                np.linalg.norm(coords_proj[DIP] - coords_proj[PIP]) / scale
-            )
+            pip_unit = coords[PIP] / np.linalg.norm(coords[PIP])
+            pip_node_length = np.linalg.norm(coords[DIP] - coords[PIP]) / scale
             pip_vec = np.append(pip_unit, pip_node_length)
 
-            dip_unit = coords_proj[DIP] / np.linalg.norm(coords_proj[DIP])
-            dip_node_length = (
-                np.linalg.norm(coords_proj[TIP] - coords_proj[DIP]) / scale
-            )
+            dip_unit = coords[DIP] / np.linalg.norm(coords[DIP])
+            dip_node_length = np.linalg.norm(coords[TIP] - coords[DIP]) / scale
             dip_vec = np.append(dip_unit, dip_node_length)
 
-            tip_unit = coords_proj[TIP] / np.linalg.norm(coords_proj[TIP])
+            tip_unit = coords[TIP] / np.linalg.norm(coords[TIP])
             tip_node_length = 0
             tip_vec = np.append(tip_unit, tip_node_length)
 
@@ -167,7 +158,7 @@ class DatasetOptimizer:
             coords_normalized[TIP].extend(tip_vec.tolist())
 
         features = np.array(coords_normalized)
-        return features, coords_proj, scale.item()
+        return features
 
     def saveSTB(self, start, end, path):
         count = 0
@@ -182,13 +173,13 @@ class DatasetOptimizer:
         count = 0
         for img_type in self.types:
             for pt in (self.data_dir / img_type).glob("*.npy"):
-                coords_proj, coords_optim = np.load(pt)
+                coords, coords_optim = np.load(pt)
                 scale_opt = np.linalg.norm(coords_optim[9] - coords_optim[0])
-                error = (coords_optim - coords_proj) / scale_opt
-                normalized_coords = self.getFeatures(coords_proj)[0]
+                error = (coords_optim - coords) / scale_opt
+                normalized_features = self.getFeatures(coords)
                 data = (
-                    torch.tensor(coords_proj),
-                    torch.tensor(normalized_coords),
+                    torch.tensor(coords),
+                    torch.tensor(normalized_features),
                     torch.tensor(coords_optim),
                     torch.tensor(error),
                 )
@@ -214,8 +205,8 @@ class DatasetOptimizer:
             val_end = clean_val_end if img_type == "Noisy" else noisy_val_end
 
             for pt in (self.data_dir / f"{img_type}Normalized").glob("*.pt"):
-                coords_proj, normalized_coords, coords_optim, error = torch.load(pt)
-                data = (coords_proj, normalized_coords, coords_optim)
+                coords, normalized_coords, coords_optim, error = torch.load(pt)
+                data = (coords, normalized_coords, coords_optim)
 
                 if count < train_end:
                     save_dir = self.data_dir / "Training"
@@ -247,8 +238,6 @@ class DatasetOptimizer:
                 os.remove(save_path)
 
 
-"""
-optimizer = DatasetOptimizer(mp = True)
+optimizer = DatasetOptimizer(mp=True)
 optimizer.optimize()
 optimizer.saveData()
-"""
