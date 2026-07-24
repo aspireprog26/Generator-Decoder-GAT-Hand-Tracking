@@ -6,9 +6,5 @@ torch_geometric
 opencv-python
 numpy
 scipy
-pathlib
-more-itertools
 mediapipe
-json
-math
 pynput
