@@ -26,9 +26,9 @@ configs = {
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
-    "model_dir": r"c:\Users\miket\Documents\Hand-Tracking-2\Model",
-    "data_dir": r"c:\Users\miket\Documents\StereoSTBDataset",
-    "post_data_dir": r"c:\Users\miket\Documents\StereoDataset",
+    "model_dir": "/mnt/c/Users/miket/Documents/Model",
+    "data_dir": "/mnt/c/Users/miket/Documents/StereoSTBDataset",
+    "post_data_dir": "/mnt/c/Users/miket/Documents/StereoDataset",
     "es_patience": 10,
     "es_thresh": 1e-4,
     "scheduler_factor": 0.5,
@@ -98,11 +98,10 @@ generator_val_dataset = torch.load(
 )
 
 
-# Only use num_workers for linux training.
 def createDataset(batch_size):
     decoder_train_loader = DataLoader(
         dataset=decoder_train_dataset,
-        mum_workers=configs["num_workers"],
+        num_workers=configs["num_workers"],
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateDecoder,

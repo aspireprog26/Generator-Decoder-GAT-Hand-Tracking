@@ -10,7 +10,7 @@ from torch_geometric.data import Batch
 
 from model import AnatomyModel
 
-with open(r"c:\Users\miket\Documents\Hand-Tracking-2\Model\configs.json", "r") as f:
+with open("/mnt/c/Users/miket/Documents/Model/configs.json", "r") as f:
     configs = json.load(f)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

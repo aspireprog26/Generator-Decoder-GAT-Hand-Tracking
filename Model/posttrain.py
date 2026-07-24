@@ -9,7 +9,7 @@ from torch_geometric.data import Batch
 
 from model import AnatomyModel
 
-with open(r"c:\Users\miket\Documents\Hand-Tracking-2\Model\configs.json", "r") as f:
+with open("/mnt/c/Users/miket/Documents/Model/configs.json", "r") as f:
     configs = json.load(f)
 
 configs["decoder_lr"] = 1e-4
@@ -26,7 +26,6 @@ def collate(batch):
     return (batch, targets, raw_coords)
 
 
-# Only use num_workers on linux
 train_dataset = torch.load(Path(configs["post_data_dir"]) / "Training" / "dataset.pt")
 train_loader = DataLoader(
     dataset=train_dataset,
