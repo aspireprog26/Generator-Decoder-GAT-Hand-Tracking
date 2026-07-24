@@ -30,7 +30,7 @@ def collate(batch):
 train_dataset = torch.load(Path(configs["post_data_dir"]) / "Training" / "dataset.pt")
 train_loader = DataLoader(
     dataset=train_dataset,
-    # num_workers=configs["num_workers"],
+    num_workers=configs["num_workers"],
     batch_size=configs["batch_size"],
     shuffle=True,
     drop_last=configs["drop_last"],
@@ -40,7 +40,7 @@ train_loader = DataLoader(
 val_dataset = torch.load(Path(configs["post_data_dir"]) / "Validation" / "dataset.pt")
 val_loader = DataLoader(
     dataset=val_dataset,
-    # num_workers=configs["num_workers"],
+    num_workers=configs["num_workers"],
     batch_size=configs["batch_size"],
     drop_last=configs["drop_last"],
     collate_fn=collate,

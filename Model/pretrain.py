@@ -102,7 +102,7 @@ generator_val_dataset = torch.load(
 def createDataset(batch_size):
     decoder_train_loader = DataLoader(
         dataset=decoder_train_dataset,
-        # num_workers=configs["num_workers"],
+        mum_workers=configs["num_workers"],
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateDecoder,
@@ -111,7 +111,7 @@ def createDataset(batch_size):
 
     decoder_val_loader = DataLoader(
         dataset=decoder_val_dataset,
-        #   num_workers=configs["num_workers"],
+        num_workers=configs["num_workers"],
         batch_size=batch_size,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
@@ -119,7 +119,7 @@ def createDataset(batch_size):
 
     generator_train_loader = DataLoader(
         dataset=generator_train_dataset,
-        #   num_workers=configs["num_workers"],
+        num_workers=configs["num_workers"],
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateGenerator,
@@ -128,7 +128,7 @@ def createDataset(batch_size):
 
     generator_val_loader = DataLoader(
         dataset=generator_val_dataset,
-        #   num_workers=configs["num_workers"],
+        num_workers=configs["num_workers"],
         batch_size=batch_size,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],

@@ -75,7 +75,7 @@ def collateGenerator(batch):
 decoder_test_dataset = torch.load(Path(configs["data_dir"]) / "Testing" / "dataset.pt")
 decoder_test_loader = DataLoader(
     dataset=decoder_test_dataset,
-    # num_workers=configs["num_workers"],
+    num_workers=configs["num_workers"],
     batch_size=configs["batch_size"],
     drop_last=configs["drop_last"],
     collate_fn=collateDecoder,
@@ -86,7 +86,7 @@ generator_test_dataset = torch.load(
 )
 generator_test_loader = DataLoader(
     dataset=generator_test_dataset,
-    # num_workers=configs["num_workers"],
+    num_workers=configs["num_workers"],
     batch_size=configs["batch_size"],
     drop_last=configs["drop_last"],
     collate_fn=collateGenerator,

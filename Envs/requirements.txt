@@ -1,7 +1,5 @@
 optuna
-torch
-torchvision
-torchaudio
+torch --index-url https://download.pytorch.org/whl/cu124
 torch_geometric
 opencv-python
 numpy
