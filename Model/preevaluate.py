@@ -75,7 +75,7 @@ def collateGenerator(batch):
 decoder_test_dataset = torch.load(Path(configs["data_dir"]) / "Testing" / "dataset.pt")
 decoder_test_loader = DataLoader(
     dataset=decoder_test_dataset,
-    num_workers=configs["num_workers"],
+    # num_workers=configs["num_workers"],
     batch_size=configs["batch_size"],
     drop_last=configs["drop_last"],
     collate_fn=collateDecoder,
@@ -86,7 +86,7 @@ generator_test_dataset = torch.load(
 )
 generator_test_loader = DataLoader(
     dataset=generator_test_dataset,
-    num_workers=configs["num_workers"],
+    # num_workers=configs["num_workers"],
     batch_size=configs["batch_size"],
     drop_last=configs["drop_last"],
     collate_fn=collateGenerator,
@@ -106,8 +106,16 @@ chol_col = torch.load(
     weights_only=False,
 ).to(device)
 
+jitter = 1e-6
 cov_row = chol_row @ chol_row.T
+cov_row = cov_row + jitter * torch.eye(
+    cov_row.shape[-1], device=device, dtype=cov_row.dtype
+)
+
 cov_col = chol_col @ chol_col.T
+cov_col = cov_col + jitter * torch.eye(
+    cov_col.shape[-1], device=device, dtype=cov_col.dtype
+)
 
 col_inv = torch.linalg.inv(cov_col)
 logdet_col = torch.linalg.slogdet(cov_col).logabsdet

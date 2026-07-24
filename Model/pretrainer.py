@@ -25,7 +25,7 @@ class Trainer:
         generator_scheduler,
     ):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(self.device)
+
         self.decoder_model = decoder_model.to(self.device)
         self.generator_model = generator_model.to(self.device)
 
@@ -60,6 +60,7 @@ class Trainer:
             weights_only=False,
         ).to(self.device, dtype=torch.float32)
 
+        # Keeps matrices non-singular for stable training
         jitter = 1e-6
         self.cov_row = self.chol_row @ self.chol_row.T
         self.cov_row = self.cov_row + jitter * torch.eye(

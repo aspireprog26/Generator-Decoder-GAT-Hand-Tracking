@@ -46,7 +46,7 @@ model.eval()
 test_dataset = torch.load(Path(configs["post_data_dir"]) / "Testing" / "dataset.pt")
 test_loader = DataLoader(
     dataset=test_dataset,
-    num_workers=configs["num_workers"],
+    # num_workers=configs["num_workers"],
     batch_size=configs["batch_size"],
     drop_last=configs["drop_last"],
     collate_fn=collate,
