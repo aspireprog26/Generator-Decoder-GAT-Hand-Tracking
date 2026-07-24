@@ -1,16 +1,15 @@
 import json
-import torch
-import torch.nn as nn
-import torch.optim as optim
 from pathlib import Path
+
+import torch
 from posttrainer import Trainer
-from model import AnatomyModel
+from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-with open(
-    "/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Model/configs.json", "r"
-) as f:
+from model import AnatomyModel
+
+with open(r"c:\Users\miket\Documents\Hand-Tracking-2\Model\configs.json", "r") as f:
     configs = json.load(f)
 
 configs["decoder_lr"] = 1e-4

@@ -1,8 +1,8 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
 from pathlib import Path
+
 import earlystopper as es
+import torch
+from torch import nn, optim
 from torch.utils.data import DataLoader
 
 

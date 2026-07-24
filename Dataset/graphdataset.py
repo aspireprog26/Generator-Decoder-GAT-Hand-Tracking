@@ -1,7 +1,8 @@
-import torch
 from pathlib import Path
-from torch_geometric.data import Data
+
+import torch
 from handedgeindex import hand_edge_index
+from torch_geometric.data import Data
 
 
 def createGraphDataset(mode, type):

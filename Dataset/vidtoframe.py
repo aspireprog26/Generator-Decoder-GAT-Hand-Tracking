@@ -1,5 +1,5 @@
+import os  # noqa: I001
 import cv2
-import os
 
 video_path = r"c:\Users\Test\Documents\StereoDataset\Noisy\3.mp4"
 output_dir = r"c:\Users\Test\Documents\StereoDataset\Noisy"

@@ -1,6 +1,6 @@
 import cv2
-import numpy as np
 import mediapipe as mp
+import numpy as np
 
 """
 Use for RTMPose implementation:
@@ -343,8 +343,8 @@ class MediaPipe:
             p1 = coords[a]
             p2 = coords[b]
 
-            pt1 = (int(round(p1[0])), int(round(p1[1])))
-            pt2 = (int(round(p2[0])), int(round(p2[1])))
+            pt1 = (round(p1[0]), round(p1[1]))
+            pt2 = (round(p2[0]), round(p2[1]))
             cv2.line(
                 frame, pt1, pt2, (12, 27, 196), 2
             )  # Color the lines of the keypoint skeleton
@@ -352,7 +352,7 @@ class MediaPipe:
         for i in range(21):
             x = coords[i][0]
             y = coords[i][1]
-            center = (int(round(x)), int(round(y)))
+            center = (round(x), round(y))
             cv2.circle(frame, center, 5, (0, 0, 255), -1)  # Inner circle
             cv2.circle(frame, center, 5, (0, 0, 0), 1)  # Border circle
 

@@ -1,13 +1,13 @@
-import cv2
 import sys
+from threading import Thread
+
+import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 from pynput import keyboard
-from threading import Thread
-import matplotlib.pyplot as plt
 
 sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Keypoints")
 import keypointdetection as kp
-from constrain import OptimizeHands
 
 CAM = 1
 ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"

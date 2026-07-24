@@ -1,15 +1,15 @@
 import json
-import torch
-import numpy as np
-import torch.nn as nn
 from pathlib import Path
-from model import AnatomyModel
+
+import numpy as np
+import torch
+from torch import nn
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-with open(
-    "/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Model/configs.json", "r"
-) as f:
+from model import AnatomyModel
+
+with open(r"c:\Users\miket\Documents\Hand-Tracking-2\Model\configs.json", "r") as f:
     configs = json.load(f)
 
 

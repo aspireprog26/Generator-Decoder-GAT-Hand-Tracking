@@ -1,13 +1,12 @@
-import cv2
-import numpy as np
-from pathlib import Path
-import matplotlib.pyplot as plt
-
 import sys
+from pathlib import Path
+
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
 
 sys.path.insert(0, r"/home/mrtcloud-1/Documents/Hand-Tracking-2/Keypoints")
 from keypointdetection import MediaPipe
-
 from constrain import OptimizeHands
 
 # Define the Hand Skeleton connections. Each tuple draws a line between keypoints A and B

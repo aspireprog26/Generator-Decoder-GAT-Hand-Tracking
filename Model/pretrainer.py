@@ -1,9 +1,9 @@
-import torch
-import optuna
-import torch.nn as nn
-import torch.optim as optim
-from pathlib import Path
 from itertools import cycle
+from pathlib import Path
+
+import optuna
+import torch
+from torch import nn, optim
 from torch.utils.data import DataLoader
 
 
@@ -25,6 +25,7 @@ class Trainer:
         generator_scheduler,
     ):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(self.device)
         self.decoder_model = decoder_model.to(self.device)
         self.generator_model = generator_model.to(self.device)
 
@@ -59,8 +60,15 @@ class Trainer:
             weights_only=False,
         ).to(self.device, dtype=torch.float32)
 
+        jitter = 1e-6
         self.cov_row = self.chol_row @ self.chol_row.T
+        self.cov_row = self.cov_row + jitter * torch.eye(
+            self.cov_row.shape[-1], device=self.device, dtype=self.cov_row.dtype
+        )
         cov_col = self.chol_col @ self.chol_col.T
+        cov_col = cov_col + jitter * torch.eye(
+            cov_col.shape[-1], device=self.device, dtype=cov_col.dtype
+        )
 
         self.col_inv = torch.linalg.inv(cov_col)
         self.logdet_col = torch.linalg.slogdet(cov_col).logabsdet

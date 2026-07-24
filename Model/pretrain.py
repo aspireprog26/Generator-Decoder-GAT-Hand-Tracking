@@ -1,13 +1,14 @@
-import torch
 import json
-import optuna
-import torch.nn as nn
-import torch.optim as optim
 from pathlib import Path
-from model import AnatomyModel
+
+import optuna
+import torch
 from pretrainer import Trainer
-from torch_geometric.data import Batch
+from torch import nn, optim
 from torch.utils.data import DataLoader
+from torch_geometric.data import Batch
+
+from model import AnatomyModel
 
 configs = {
     "decoder_lr": 1e-3,
@@ -25,9 +26,9 @@ configs = {
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
-    "model_dir": "/home/mrtcloud-1/Documents/Hand-Tracking-2/Model",
-    "data_dir": "/home/mrtcloud-1/Documents/StereoSTBDataset",
-    "post_data_dir": "/home/mrtcloud-1/Documents/StereoDataset",
+    "model_dir": r"c:\Users\miket\Documents\Hand-Tracking-2\Model",
+    "data_dir": r"c:\Users\miket\Documents\StereoSTBDataset",
+    "post_data_dir": r"c:\Users\miket\Documents\StereoDataset",
     "es_patience": 10,
     "es_thresh": 1e-4,
     "scheduler_factor": 0.5,
@@ -97,10 +98,11 @@ generator_val_dataset = torch.load(
 )
 
 
+# Only use num_workers for linux training.
 def createDataset(batch_size):
     decoder_train_loader = DataLoader(
         dataset=decoder_train_dataset,
-        num_workers=configs["num_workers"],
+        # num_workers=configs["num_workers"],
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateDecoder,
@@ -109,7 +111,7 @@ def createDataset(batch_size):
 
     decoder_val_loader = DataLoader(
         dataset=decoder_val_dataset,
-        num_workers=configs["num_workers"],
+        #   num_workers=configs["num_workers"],
         batch_size=batch_size,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
@@ -117,7 +119,7 @@ def createDataset(batch_size):
 
     generator_train_loader = DataLoader(
         dataset=generator_train_dataset,
-        num_workers=configs["num_workers"],
+        #   num_workers=configs["num_workers"],
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateGenerator,
@@ -126,7 +128,7 @@ def createDataset(batch_size):
 
     generator_val_loader = DataLoader(
         dataset=generator_val_dataset,
-        num_workers=configs["num_workers"],
+        #   num_workers=configs["num_workers"],
         batch_size=batch_size,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
@@ -250,17 +252,18 @@ def objective(trial):
     return val_loss
 
 
-study = optuna.create_study(
-    direction="minimize",
-    pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=20),
-)
-study.optimize(objective, n_trials=50)
+if __name__ == "__main__":
+    study = optuna.create_study(
+        direction="minimize",
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=20),
+    )
+    study.optimize(objective, n_trials=50)
 
-print(f"Best loss: {study.best_value}")
-print("\nBest parameters:")
-for key, value in study.best_params.items():
-    print(key, value)
+    print(f"Best loss: {study.best_value}")
+    print("\nBest parameters:")
+    for key, value in study.best_params.items():
+        print(key, value)
 
-configs.update(study.best_params)
-saveConfigs()
-train(configs)
+    configs.update(study.best_params)
+    saveConfigs()
+    train(configs)

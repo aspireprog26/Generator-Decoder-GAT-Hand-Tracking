@@ -1,16 +1,16 @@
 import json
-import torch
 from pathlib import Path
-from torch.nn import MSELoss
-from model import AnatomyModel
-from torch_geometric.data import Batch
-from torch.utils.data import DataLoader
+
+import torch
 from pretrain import generator_criterion as gc
 from pretrainer import Trainer
+from torch.nn import MSELoss
+from torch.utils.data import DataLoader
+from torch_geometric.data import Batch
 
-with open(
-    "/Users/michaeltoppin/Documents/Coding/Hand-Tracking-2/Model/configs.json", "r"
-) as f:
+from model import AnatomyModel
+
+with open(r"c:\Users\miket\Documents\Hand-Tracking-2\Model\configs.json", "r") as f:
     configs = json.load(f)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

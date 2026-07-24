@@ -1,9 +1,10 @@
 import os
 import sys
-import cv2
-import torch
-import numpy as np
 from pathlib import Path
+
+import cv2
+import numpy as np
+import torch
 from scipy.io import loadmat
 
 sys.path.insert(0, "/home/mrtcloud-1/Documents/Hand-Tracking-2/Keypoints")

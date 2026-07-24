@@ -1,6 +1,7 @@
+from pathlib import Path
+
 import cv2
 import numpy as np
-from pathlib import Path
 
 PATTERN_SIZE = (8, 5)  # Size of checkerboard inner corners
 SQUARE_SIZE = 0.038  # In meters

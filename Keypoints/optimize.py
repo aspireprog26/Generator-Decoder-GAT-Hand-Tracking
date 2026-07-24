@@ -1,7 +1,7 @@
-import torch
 import numpy as np
+import torch
 import torch.nn.functional as F
-from keypointdetection import HAND_SKELETON, ANGLE_JOINTS
+from keypointdetection import ANGLE_JOINTS, HAND_SKELETON
 
 
 class Losses:
