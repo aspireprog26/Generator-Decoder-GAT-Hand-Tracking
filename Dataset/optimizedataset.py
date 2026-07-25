@@ -168,6 +168,8 @@ class DatasetOptimizer:
                 for n in range(1500):
                     coords = torch.tensor(self.loadCoords(bg, pose, n))
                     # Refactor to add left and keypoint pose detection
+                    left_kps = None
+                    right_kps = None
                     data = (coords, left_kps, right_kps)
                     torch.save(data, path / f"{count}.pt")
                     count += 1
