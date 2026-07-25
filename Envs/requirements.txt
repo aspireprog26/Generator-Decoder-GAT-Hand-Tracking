@@ -1,0 +1,8 @@
+optuna
+torch --index-url https://download.pytorch.org/whl/cu124
+torch_geometric
+opencv-python
+numpy
+scipy
+mediapipe==0.10.14
+pynput
