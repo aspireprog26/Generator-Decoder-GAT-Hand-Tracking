@@ -2,12 +2,11 @@ import json
 from pathlib import Path
 
 import torch
+from model import AnatomyModel
 from posttrainer import Trainer
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-
-from model import AnatomyModel
 
 with open("/home/miket/finalconfigs.json", "r") as f:
     configs = json.load(f)

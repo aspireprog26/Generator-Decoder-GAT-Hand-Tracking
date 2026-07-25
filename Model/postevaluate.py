@@ -3,11 +3,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from model import AnatomyModel
 from torch import nn
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-
-from model import AnatomyModel
 
 with open("/home/miket/decconfigs.json", "r") as f:
     configs = json.load(f)

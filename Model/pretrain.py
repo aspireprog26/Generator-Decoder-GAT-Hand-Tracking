@@ -3,12 +3,11 @@ from pathlib import Path
 
 import optuna
 import torch
+from model import AnatomyModel
 from pretrainer import Trainer
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-
-from model import AnatomyModel
 
 MODE = "train"
 configs = {

@@ -2,13 +2,12 @@ import json
 from pathlib import Path
 
 import torch
+from model import AnatomyModel
 from pretrain import generator_criterion as gc
 from pretrainer import Trainer
 from torch.nn import MSELoss
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-
-from model import AnatomyModel
 
 with open("/home/miket/finalconfigs.json", "r") as f:
     configs = json.load(f)
