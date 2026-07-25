@@ -169,7 +169,7 @@ class DatasetOptimizer:
                     coords = torch.tensor(self.loadCoords(bg, pose, n))
                     # Refactor to add left and keypoint pose detection
                     data = (coords, left_kps, right_kps)
-                    torch.save(DatasetOptimizer, path / f"{count}.pt")
+                    torch.save(data, path / f"{count}.pt")
                     count += 1
 
     def stereoSave(self):
