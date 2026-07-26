@@ -8,7 +8,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-with open("/home/miket/decconfigs.json", "r") as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/decconfigs.json", "r") as f:
     configs = json.load(f)
 
 

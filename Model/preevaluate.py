@@ -9,7 +9,7 @@ from torch.nn import MSELoss
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-with open("/home/miket/finalconfigs.json", "r") as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/finalconfigs.json", "r") as f:
     configs = json.load(f)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

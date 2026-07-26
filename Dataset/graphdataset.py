@@ -8,7 +8,9 @@ from torch_geometric.data import Data
 def createGraphDataset(mode, type):
     dataset = []
     dir = (
-        "/home/miket/StereoSTBDataset" if type == "STB" else "/home/miket/StereoDataset"
+        "/home/miket/Documents/StereoSTBDataset"
+        if type == "STB"
+        else "/home/miket/Documents/StereoDataset"
     )
     dir = Path(dir)
 
@@ -39,5 +41,10 @@ def createGraphs(type: str):
     createGraphDataset("test", type)
 
 
+print("Starting STB Graph Generation.")
 createGraphs("STB")
+print("STB Graph Generation Complete.")
+
+print("Starting Stereo Graph Generation.")
 createGraphs("Stereo")
+print("Stereo Graph Generation Complete.")

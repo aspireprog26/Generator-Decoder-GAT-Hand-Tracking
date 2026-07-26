@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.io import loadmat
 
-sys.path.insert(0, "/home/miket/Hand-Tracking-2/Keypoints")
+sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
 from keypointdetection import MediaPipe
 
 # Define the Hand Skeleton connections. Each tuple draws a line between keypoints A and B
@@ -35,7 +35,7 @@ HAND_SKELETON = [
 
 if __name__ == "__main__":
     pose = MediaPipe()
-    image = cv2.imread("/home/miket/StereoDataset/Noisy/0542.jpg")
+    image = cv2.imread("/home/miket/Documents/StereoDataset/Noisy/0542.jpg")
     h, w = image.shape[:2]
     half = w // 2
 
@@ -48,12 +48,12 @@ if __name__ == "__main__":
     kps = [left_kps, right_kps]
 
     for i in range(2):
-        out = Path("/home/miket/Hand-Tracking-2/FrameOut") / f"{i}.jpg"
+        out = Path("/home/miket/Documents/Hand-Tracking-2/FrameOut") / f"{i}.jpg"
         vis = pose.draw_hand(kps[i], frames[i])
         cv2.imwrite(out, vis)
 
     fs = cv2.FileStorage(
-        "/home/miket/Hand-Tracking-2/Stereo/stereo.yml",
+        "/home/miket/Documents/Hand-Tracking-2/Stereo/stereo.yml",
         cv2.FILE_STORAGE_READ,
     )
 

@@ -9,14 +9,14 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-MODE = "train"
+MODE = "optuna"
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
     "generator_dropout": 0.2,
     "decoder_dropout": 0.2,
     "batch_size": 64,
-    "input_size": 7,
+    "input_size": 19,
     "decoder_hidden_size": 32,
     "generator_hidden_size": 64,
     "decoder_output_size": 63,
@@ -26,9 +26,9 @@ configs = {
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
-    "model_dir": "/home/miket/Hand-Tracking-2/Model",
-    "data_dir": "/home/miket/StereoSTBDataset",
-    "post_data_dir": "/home/miket/StereoDataset",
+    "model_dir": "/home/miket/Documents/Hand-Tracking-2/Model",
+    "data_dir": "/home/miket/Documents/StereoSTBDataset",
+    "post_data_dir": "/home/miket/Documents/StereoDataset",
     "es_patience": 10,
     "es_thresh": 1e-4,
     "scheduler_factor": 0.5,
@@ -237,8 +237,8 @@ def train(cfgs: dict, trial=None):
 
 def objective(trial):
     trial_configs = configs.copy()
-    generator_hidden_size = trial.suggest_int("generator_hidden_size", 32, 64, step=16)
-    decoder_hidden_size = trial.suggest_int("decoder_hidden_size", 32, 64, step=16)
+    generator_hidden_size = trial.suggest_int("generator_hidden_size", 32, 128, step=16)
+    decoder_hidden_size = trial.suggest_int("decoder_hidden_size", 32, 128, step=16)
     generator_dropout = trial.suggest_float("generator_dropout", 0.1, 0.3)
     decoder_dropout = trial.suggest_float("decoder_dropout", 0.2, 0.4)
     decoder_lr = trial.suggest_float("decoder_lr", 1e-5, 1e-3, log=True)
@@ -247,7 +247,7 @@ def objective(trial):
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
     scheduler_factor = trial.suggest_float("scheduler_factor", 0.2, 0.7)
     scheduler_patience = trial.suggest_int("scheduler_patience", 5, 10)
-    num_epochs = trial.suggest_int("num_epochs", 30, 100, step=10)
+    num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
 
     trial_configs.update(
         {
@@ -276,9 +276,9 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
         )
-        study.optimize(objective, n_trials=50)
+        study.optimize(objective, n_trials=100)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
@@ -290,4 +290,4 @@ if __name__ == "__main__":
         train(configs)
     else:
         train(final_configs)
-        saveConfigs(configs, "finalconfigs")
+        saveConfigs(configs, "decpreconfigs")
