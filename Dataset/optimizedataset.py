@@ -238,10 +238,16 @@ class DatasetOptimizer:
                         print(e)
                         continue
 
-                    normalized_features = self.getFeatures(coords, left_kps, right_kps)
+                    normalized_features_dec = self.getFeatures(
+                        coords, left_kps, right_kps
+                    )
+                    normalized_features_gen = self.getFeatures(
+                        coords_optim, left_kps, right_kps
+                    )
                     data = (
                         torch.tensor(coords),
-                        torch.tensor(normalized_features),
+                        torch.tensor(normalized_features_dec),
+                        torch.tensor(normalized_features_gen),
                         torch.tensor(coords_optim),
                     )
                     torch.save(
@@ -268,8 +274,18 @@ class DatasetOptimizer:
                 val_end = clean_val_end if img_type == "Noisy" else noisy_val_end
 
                 for pt in (self.data_dir / f"{img_type}Normalized").glob("*.pt"):
-                    coords, normalized_coords, coords_optim = torch.load(pt)
-                    data = (coords, normalized_coords, coords_optim)
+                    (
+                        coords,
+                        normalized_features_dec,
+                        normalized_features_gen,
+                        coords_optim,
+                    ) = torch.load(pt)
+                    data = (
+                        coords,
+                        normalized_features_dec,
+                        normalized_features_gen,
+                        coords_optim,
+                    )
 
                     if count < train_end:
                         save_dir = self.data_dir / "Training"
@@ -283,19 +299,41 @@ class DatasetOptimizer:
                     glob_count += 1
                     pbar.update(1)
 
+    def standardize(self, mode, decoder=True):
+        data = []
+        dir = self.data_dir / mode
+
+        for pt in dir.glob("*.pt"):
+            _, normalized_features_dec, normalized_features_gen, _ = torch.load(pt)
+            normalized_features = (
+                normalized_features_dec if decoder else normalized_features_gen
+            )
+            data.append(normalized_features)
+
+        data = torch.stack(data, dim=0)
+        mean = torch.mean(data, dim=0)
+        std = torch.std(data, dim=0).clamp(1e-6)
+
+        stats = (mean, std)
+        dir = dir / "Decoder" if decoder else dir / "Generator"
+        torch.save(stats, dir / "stats.pt")
+
     def saveData(self):
-        """
         print("Starting STB Dataset.")
         self.saveSTB(1, 5, self.stb_dir / "Training")
         self.saveSTB(5, 6, self.stb_dir / "Validation")
         self.saveSTB(6, 7, self.stb_dir / "Testing")
         print("STB Dataset Complete.")
-        """
 
         print("\nStarting Stereo Dataset.")
         self.stereoSave()
         self.createTrainTestVal()
         print("Stereo Dataset Complete.")
+
+        print("Standardizing Stereo Dataset.")
+        self.standardize("Training")
+        self.standardize("Training", decoder=False)
+        print("Standardization Complete.")
 
     def removeOld(self):
         for type in self.types:
@@ -305,5 +343,5 @@ class DatasetOptimizer:
 
 
 optimizer = DatasetOptimizer(mp=True)
-# optimizer.optimize()
+optimizer.optimize()
 optimizer.saveData()

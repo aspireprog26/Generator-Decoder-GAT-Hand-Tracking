@@ -92,6 +92,7 @@ generator_test_loader = DataLoader(
 )
 
 features = Trainer().features
+standardize = Trainer().standardize
 decoder_criterion = MSELoss()
 generator_criterion = gc
 
@@ -142,6 +143,7 @@ def evalModel():
             normalized_features, _, _ = features(
                 decoder_coords, left_kps, right_kps, None
             )
+            normalized_features = standardize(normalized_features, decoder=False)
             mean_mat, scale = generator_model(
                 normalized_features, decoder_edge_index, decoder_b
             )
@@ -154,6 +156,8 @@ def evalModel():
             normalized_features, coords_proj, scale = features(
                 decoder_coords, left_kps, right_kps, noise
             )
+            normalized_features = standardize(normalized_features)
+
             errors = decoder_model(normalized_features, decoder_edge_index, decoder_b)
             errors = errors.view(errors.size(0), 21, 3)
             pred_coords = coords_proj + (scale[:, None, None] * errors)
@@ -176,6 +180,7 @@ def evalModel():
 
             gen_scale = torch.linalg.norm(gen_targets[:, 9] - gen_targets[:, 0], dim=1)
             true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+            generator_features = standardize(generator_features, decoder=False)
 
             mean_mat, scale = generator_model(
                 generator_features, generator_edge_index, generator_b

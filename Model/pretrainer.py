@@ -56,12 +56,12 @@ class Trainer:
         )
 
         self.chol_row = torch.load(
-            Path(configs["post_data_dir"]) / "cholrow.pt",
+            Path(configs["stereo_data_dir"]) / "cholrow.pt",
             weights_only=False,
         ).to(self.device, dtype=torch.float32)
 
         self.chol_col = torch.load(
-            Path(configs["post_data_dir"]) / "cholcol.pt",
+            Path(configs["stereo_data_dir"]) / "cholcol.pt",
             weights_only=False,
         ).to(self.device, dtype=torch.float32)
 
@@ -78,6 +78,20 @@ class Trainer:
 
         self.col_inv = torch.linalg.inv(cov_col)
         self.logdet_col = torch.linalg.slogdet(cov_col).logabsdet
+
+        decoder_stats = torch.load(
+            Path(configs["stereo_data_dir"]) / "Training" / "Decoder" / "stats.pt",
+            weights_only=False,
+        )
+        self.decoder_mean = decoder_stats[0].to(self.device, dtype=torch.float32)
+        self.decoder_std = decoder_stats[1].to(self.device, dtype=torch.float32)
+
+        generator_stats = torch.load(
+            Path(configs["stereo_data_dir"]) / "Training" / "Generator" / "stats.pt",
+            weights_only=False,
+        )
+        self.generator_mean = generator_stats[0].to(self.device, dtype=torch.float32)
+        self.generator_std = generator_stats[1].to(self.device, dtype=torch.float32)
 
         next_idx = [0]
         for finger in range(5):
@@ -143,6 +157,12 @@ class Trainer:
         features = self.getFeatures(coords_proj, left_kps, right_kps, eps)
         return features, coords_proj, scale
 
+    def standardize(self, features, decoder: bool = True):
+        mean = self.decoder_mean if decoder else self.generator_mean
+        std = self.decoder_std if decoder else self.generator_std
+        stand_feats = (features - mean) / std
+        return stand_feats
+
     def train(self, trial=None):
         for epoch in range(self.num_epochs):
             generator_train_iter = cycle(self.generator_train_loader)
@@ -177,6 +197,10 @@ class Trainer:
                 )
                 true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
 
+                generator_features = self.standardize(
+                    generator_features.reshape(gen_batch.num_graphs, 21, 19),
+                    decoder=False,
+                )
                 mean_mat, scale = self.generator_model(
                     generator_features, generator_edge_index, generator_b
                 )
@@ -211,6 +235,9 @@ class Trainer:
                 normalized_features, _, _ = self.features(
                     decoder_coords, left_kps, right_kps, None
                 )  # Original 3D normalized features
+                normalized_features = self.standardize(
+                    normalized_features, decoder=False
+                )
 
                 # Generate noise matrix and scales
                 with torch.inference_mode():
@@ -226,6 +253,7 @@ class Trainer:
                 normalized_features, coords_proj, scale = self.features(
                     decoder_coords, left_kps, right_kps, noise
                 )  # Distorted 3D normalized features with noise
+                normalized_features = self.standardize(normalized_features)
 
                 errors = self.decoder_model(
                     normalized_features, decoder_edge_index, decoder_b
@@ -267,6 +295,10 @@ class Trainer:
                     normalized_features, _, _ = self.features(
                         decoder_coords, left_kps, right_kps, None
                     )
+                    normalized_features = self.standardize(
+                        normalized_features, decoder=False
+                    )
+
                     mean_mat, scale = self.generator_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
@@ -279,6 +311,8 @@ class Trainer:
                     normalized_features, coords_proj, scale = self.features(
                         decoder_coords, left_kps, right_kps, noise
                     )
+                    normalized_features = self.standardize(normalized_features)
+
                     errors = self.decoder_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
@@ -307,6 +341,10 @@ class Trainer:
                         gen_targets[:, 9] - gen_targets[:, 0], dim=1
                     )
                     true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+                    generator_features = self.standardize(
+                        generator_features.reshape(generator_batch.num_graphs, 21, 19),
+                        decoder=False,
+                    )
 
                     mean_mat, scale = self.generator_model(
                         generator_features, generator_edge_index, generator_b

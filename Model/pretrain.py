@@ -27,8 +27,8 @@ configs = {
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
     "model_dir": "/home/miket/Documents/Hand-Tracking-2/Model",
-    "data_dir": "/home/miket/Documents/StereoSTBDataset",
-    "post_data_dir": "/home/miket/Documents/StereoDataset",
+    "stb_dir": "/home/miket/Documents/StereoSTBDataset",
+    "stereo_data_dir": "/home/miket/Documents/StereoDataset",
     "es_patience": 10,
     "es_thresh": 1e-4,
     "scheduler_factor": 0.5,
@@ -105,17 +105,19 @@ decoder_criterion = nn.MSELoss()
 generator_criterion = generatorCriterion
 
 decoder_train_dataset = torch.load(
-    Path(configs["data_dir"]) / "Training" / "dataset.pt", weights_only=False
+    Path(configs["stb_dir"]) / "Training" / "dataset.pt", weights_only=False
 )
 decoder_val_dataset = torch.load(
-    Path(configs["data_dir"]) / "Validation" / "dataset.pt", weights_only=False
+    Path(configs["stb_dir"]) / "Validation" / "dataset.pt", weights_only=False
 )
 
 generator_train_dataset = torch.load(
-    Path(configs["post_data_dir"]) / "Training" / "dataset.pt", weights_only=False
+    Path(configs["stereo_data_dir"]) / "Training" / "Generator" / "dataset.pt",
+    weights_only=False,
 )
 generator_val_dataset = torch.load(
-    Path(configs["post_data_dir"]) / "Validation" / "dataset.pt", weights_only=False
+    Path(configs["stereo_data_dir"]) / "Validation" / "Generator" / "dataset.pt",
+    weights_only=False,
 )
 
 
