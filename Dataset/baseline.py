@@ -1,28 +1,8 @@
-"""
-Computes baseline decoder error as mean Euclidean distance (cm) between
-the raw triangulated coordinate (`coords`) and the optimized ground truth
-(`coords_optim`), with zero model correction applied - both:
-
-  1. Over ALL samples (unfiltered)
-  2. Excluding samples flagged as catastrophic triangulation failures
-
-This uses torch.linalg.norm(dim=-1) per joint, then averages across
-joints and samples - the same metric your Trainer now reports for
-decoder_val_loss, so this is a directly comparable "do nothing" number.
-
-No files are modified or deleted - this is read-only, for comparison.
-
-Usage:
-    python baseline_check_distance.py /home/miket/Documents/StereoDataset/Validation
-"""
-
-import sys
 from pathlib import Path
 
 import numpy as np
 import torch
 
-# Same bounds as filter_dataset.py - keep in sync if you've tuned these.
 SANE_COORD_BOUND = 500.0
 BONE_LENGTH_BOUND = 50.0
 
@@ -35,7 +15,7 @@ for finger in range(5):
     BONE_PAIRS += [(0, mcp), (mcp, pip), (pip, dip), (dip, tip)]
 
 
-def is_catastrophic(coords: np.ndarray) -> bool:
+def isCatastrophic(coords: np.ndarray):
     if np.abs(coords).max() > SANE_COORD_BOUND:
         return True
     for a, b in BONE_PAIRS:
@@ -57,7 +37,7 @@ def summarize(name: str, arr: np.ndarray):
         print(f"  p{p}: {np.percentile(arr, p):.4f} cm")
 
 
-def main(data_dir: str):
+def getBaseline(data_dir: str):
     data_dir = Path(data_dir)
     files = sorted(data_dir.glob("*.pt"))
 
@@ -71,12 +51,11 @@ def main(data_dir: str):
         coords_optim = coords_optim.float()
 
         # Per-joint Euclidean distance, then mean across all 21 joints
-        # for this single sample - matches the Trainer's per-batch metric.
         per_joint_dist = torch.linalg.norm(coords - coords_optim, dim=-1)  # (21,)
         sample_mean_dist = per_joint_dist.mean().item()
         all_dist.append(sample_mean_dist)
 
-        catastrophic = is_catastrophic(coords.numpy()) or is_catastrophic(
+        catastrophic = isCatastrophic(coords.numpy()) or isCatastrophic(
             coords_optim.numpy()
         )
         if catastrophic:
@@ -97,4 +76,11 @@ def main(data_dir: str):
 
 
 if __name__ == "__main__":
-    main("/home/miket/Documents/StereoDataset/Training")
+    print("Training:")
+    getBaseline("/home/miket/Documents/StereoDataset/Training")
+
+    print("\nValidation:")
+    getBaseline("/home/miket/Documents/StereoDataset/Validation")
+
+    print("\nTesting")
+    getBaseline("/home/miket/Documents/StereoDataset/Testing")
