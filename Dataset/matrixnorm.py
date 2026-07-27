@@ -6,7 +6,7 @@ import torch
 
 class MatrixNorm:
     def __init__(self):
-        self.data_dir = Path("/home/miket/StereoDataset")
+        self.data_dir = Path("/home/miket/Documents/StereoDataset")
         self.types = ["Clean", "Noisy"]
 
     def fitMN(self, X: np.ndarray, max_iter=300, tol=1e-6, reg=1e-8, verbose=True):

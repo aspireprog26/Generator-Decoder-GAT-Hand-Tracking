@@ -9,7 +9,7 @@ from torch.nn import MSELoss
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-with open("/home/miket/finalconfigs.json", "r") as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/finalconfigs.json", "r") as f:
     configs = json.load(f)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -71,7 +71,7 @@ def collateGenerator(batch):
     return (batch, targets, raw_coords)
 
 
-decoder_test_dataset = torch.load(Path(configs["data_dir"]) / "Testing" / "dataset.pt")
+decoder_test_dataset = torch.load(Path(configs["stb_dir"]) / "Testing" / "dataset.pt")
 decoder_test_loader = DataLoader(
     dataset=decoder_test_dataset,
     num_workers=configs["num_workers"],
@@ -81,7 +81,7 @@ decoder_test_loader = DataLoader(
 )
 
 generator_test_dataset = torch.load(
-    Path(configs["post_data_dir"]) / "Testing" / "dataset.pt"
+    Path(configs["stereo_data_dir"]) / "Testing" / "Generator" / "dataset.pt"
 )
 generator_test_loader = DataLoader(
     dataset=generator_test_dataset,
@@ -92,16 +92,17 @@ generator_test_loader = DataLoader(
 )
 
 features = Trainer().features
+standardize = Trainer().standardize
 decoder_criterion = MSELoss()
 generator_criterion = gc
 
 chol_row = torch.load(
-    Path(configs["post_data_dir"]) / "cholrow.pt",
+    Path(configs["stereo_data_dir"]) / "cholrow.pt",
     weights_only=False,
 ).to(device)
 
 chol_col = torch.load(
-    Path(configs["post_data_dir"]) / "cholcol.pt",
+    Path(configs["stereo_data_dir"]) / "cholcol.pt",
     weights_only=False,
 ).to(device)
 
@@ -142,6 +143,7 @@ def evalModel():
             normalized_features, _, _ = features(
                 decoder_coords, left_kps, right_kps, None
             )
+            normalized_features = standardize(normalized_features, decoder=False)
             mean_mat, scale = generator_model(
                 normalized_features, decoder_edge_index, decoder_b
             )
@@ -154,6 +156,8 @@ def evalModel():
             normalized_features, coords_proj, scale = features(
                 decoder_coords, left_kps, right_kps, noise
             )
+            normalized_features = standardize(normalized_features)
+
             errors = decoder_model(normalized_features, decoder_edge_index, decoder_b)
             errors = errors.view(errors.size(0), 21, 3)
             pred_coords = coords_proj + (scale[:, None, None] * errors)
@@ -176,6 +180,7 @@ def evalModel():
 
             gen_scale = torch.linalg.norm(gen_targets[:, 9] - gen_targets[:, 0], dim=1)
             true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+            generator_features = standardize(generator_features, decoder=False)
 
             mean_mat, scale = generator_model(
                 generator_features, generator_edge_index, generator_b

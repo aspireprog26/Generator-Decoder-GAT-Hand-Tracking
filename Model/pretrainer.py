@@ -56,12 +56,12 @@ class Trainer:
         )
 
         self.chol_row = torch.load(
-            Path(configs["post_data_dir"]) / "cholrow.pt",
+            Path(configs["stereo_data_dir"]) / "cholrow.pt",
             weights_only=False,
         ).to(self.device, dtype=torch.float32)
 
         self.chol_col = torch.load(
-            Path(configs["post_data_dir"]) / "cholcol.pt",
+            Path(configs["stereo_data_dir"]) / "cholcol.pt",
             weights_only=False,
         ).to(self.device, dtype=torch.float32)
 
@@ -79,6 +79,20 @@ class Trainer:
         self.col_inv = torch.linalg.inv(cov_col)
         self.logdet_col = torch.linalg.slogdet(cov_col).logabsdet
 
+        decoder_stats = torch.load(
+            Path(configs["stereo_data_dir"]) / "Training" / "Decoder" / "stats.pt",
+            weights_only=False,
+        )
+        self.decoder_mean = decoder_stats[0].to(self.device, dtype=torch.float32)
+        self.decoder_std = decoder_stats[1].to(self.device, dtype=torch.float32)
+
+        generator_stats = torch.load(
+            Path(configs["stereo_data_dir"]) / "Training" / "Generator" / "stats.pt",
+            weights_only=False,
+        )
+        self.generator_mean = generator_stats[0].to(self.device, dtype=torch.float32)
+        self.generator_std = generator_stats[1].to(self.device, dtype=torch.float32)
+
         next_idx = [0]
         for finger in range(5):
             pip = 2 + 4 * finger
@@ -89,29 +103,49 @@ class Trainer:
             next_idx, dtype=torch.long, device=self.device
         )
 
-    def getFeatures(self, coords: torch.Tensor, eps: float = 1e-8):
-        coords = coords.float()
-        B = coords.shape[0]  # noqa: F841
+    def getFeatures(self, coords, coords_left, coords_right, eps: float = 1e-8):
+        def constructFeatures(coords, eps: float = 1e-8):
+            coords = coords.float()
+            B = coords.shape[0]  # noqa: F841
 
-        wrist = coords[:, 0:1, :]  # (B, 1, 3)
-        scale = torch.linalg.norm(coords[:, 9] - coords[:, 0], dim=-1).clamp_min(
-            eps
-        )  # (B,)
+            wrist = coords[:, 0:1, :]
+            scale = torch.linalg.norm(coords[:, 9] - coords[:, 0], dim=-1).clamp_min(
+                eps
+            )  # (B,)
 
-        coords_norm = (coords - wrist) / scale[:, None, None]  # (B, 21, 3)
+            coords_norm = (coords - wrist) / scale[:, None, None]
 
-        joint_norms = torch.linalg.norm(coords, dim=-1).clamp_min(eps)  # (B, 21)
-        dir_vectors = coords / joint_norms[..., None]  # (B, 21, 3)
+            joint_norms = torch.linalg.norm(coords, dim=-1).clamp_min(eps)
+            dir_vectors = coords / joint_norms[..., None]
 
-        next_coords = coords[:, self.next_joint_idx, :]  # (B, 21, 3)
-        dist_to_next = (
-            torch.linalg.norm(next_coords - coords, dim=-1) / scale[:, None]
-        )  # (B, 21)
+            next_coords = coords[:, self.next_joint_idx, :]
+            dist_to_next = (
+                torch.linalg.norm(next_coords - coords, dim=-1) / scale[:, None]
+            )
 
-        features = torch.cat(
-            [coords_norm, dir_vectors, dist_to_next.unsqueeze(-1)], dim=-1
-        )  # (B, 21, 7)
+            features = torch.cat(
+                [coords_norm, dir_vectors, dist_to_next.unsqueeze(-1)], dim=-1
+            )
+            return features
 
+        feats_3d = constructFeatures(coords, eps)
+        feats_left = constructFeatures(coords_left, eps)
+        feats_right = constructFeatures(coords_right, eps)
+
+        coords_left = coords_left.float()
+        coords_right = coords_right.float()
+
+        scale_left = torch.linalg.norm(
+            coords_left[:, 9] - coords_left[:, 0], dim=-1
+        ).clamp_min(eps)
+
+        scale_right = torch.linalg.norm(
+            coords_right[:, 9] - coords_right[:, 0], dim=-1
+        ).clamp_min(eps)
+        avg_scale = (scale_left + scale_right) / 2
+
+        disparity = (coords_left - coords_right) / avg_scale[:, None, None]
+        features = torch.cat([feats_3d, feats_left, feats_right, disparity], dim=-1)
         return features
 
     def features(self, coords, left_kps, right_kps, noise=None, eps=1e-8):
@@ -120,9 +154,14 @@ class Trainer:
         coords_proj = (
             (coords - scale[:, None, None] * noise) if noise is not None else coords
         )
-        features = self.getFeatures(coords_proj, eps)
-
+        features = self.getFeatures(coords_proj, left_kps, right_kps, eps)
         return features, coords_proj, scale
+
+    def standardize(self, features, decoder: bool = True):
+        mean = self.decoder_mean if decoder else self.generator_mean
+        std = self.decoder_std if decoder else self.generator_std
+        stand_feats = (features - mean) / std
+        return stand_feats
 
     def train(self, trial=None):
         for epoch in range(self.num_epochs):
@@ -158,6 +197,10 @@ class Trainer:
                 )
                 true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
 
+                generator_features = self.standardize(
+                    generator_features.reshape(gen_batch.num_graphs, 21, 19),
+                    decoder=False,
+                )
                 mean_mat, scale = self.generator_model(
                     generator_features, generator_edge_index, generator_b
                 )
@@ -192,6 +235,9 @@ class Trainer:
                 normalized_features, _, _ = self.features(
                     decoder_coords, left_kps, right_kps, None
                 )  # Original 3D normalized features
+                normalized_features = self.standardize(
+                    normalized_features, decoder=False
+                )
 
                 # Generate noise matrix and scales
                 with torch.inference_mode():
@@ -207,6 +253,7 @@ class Trainer:
                 normalized_features, coords_proj, scale = self.features(
                     decoder_coords, left_kps, right_kps, noise
                 )  # Distorted 3D normalized features with noise
+                normalized_features = self.standardize(normalized_features)
 
                 errors = self.decoder_model(
                     normalized_features, decoder_edge_index, decoder_b
@@ -248,6 +295,10 @@ class Trainer:
                     normalized_features, _, _ = self.features(
                         decoder_coords, left_kps, right_kps, None
                     )
+                    normalized_features = self.standardize(
+                        normalized_features, decoder=False
+                    )
+
                     mean_mat, scale = self.generator_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
@@ -260,6 +311,8 @@ class Trainer:
                     normalized_features, coords_proj, scale = self.features(
                         decoder_coords, left_kps, right_kps, noise
                     )
+                    normalized_features = self.standardize(normalized_features)
+
                     errors = self.decoder_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
@@ -288,6 +341,10 @@ class Trainer:
                         gen_targets[:, 9] - gen_targets[:, 0], dim=1
                     )
                     true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+                    generator_features = self.standardize(
+                        generator_features.reshape(generator_batch.num_graphs, 21, 19),
+                        decoder=False,
+                    )
 
                     mean_mat, scale = self.generator_model(
                         generator_features, generator_edge_index, generator_b

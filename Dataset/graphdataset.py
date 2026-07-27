@@ -5,10 +5,12 @@ from handedgeindex import hand_edge_index
 from torch_geometric.data import Data
 
 
-def createGraphDataset(mode, type):
+def createGraphDataset(mode, type, decoder: bool = True):
     dataset = []
     dir = (
-        "/home/miket/StereoSTBDataset" if type == "STB" else "/home/miket/StereoDataset"
+        "/home/miket/Documents/StereoSTBDataset"
+        if type == "STB"
+        else "/home/miket/Documents/StereoDataset"
     )
     dir = Path(dir)
 
@@ -21,23 +23,43 @@ def createGraphDataset(mode, type):
 
     for path in sorted(dir.glob("*.pt")):
         if type == "STB":
-            coords, left_kps, right_kps = torch.load(path)
+            coords, left_kps, right_kps = torch.load(path, weights_only=False)
             graph = Data(x=coords, edge_index=hand_edge_index)
             data_pt = (graph, left_kps, right_kps)
-
         else:
-            coords_proj, normalized_coords, coords_optim = torch.load(path)
-            graph = Data(x=normalized_coords, edge_index=hand_edge_index)
+            (
+                coords_proj,
+                normalized_features_dec,
+                normalized_features_gen,
+                coords_optim,
+            ) = torch.load(path, weights_only=False)
+            graph = (
+                Data(x=normalized_features_dec, edge_index=hand_edge_index)
+                if decoder
+                else Data(x=normalized_features_gen, edge_index=hand_edge_index)
+            )
             data_pt = (graph, coords_optim, coords_proj)
         dataset.append(data_pt)
+
+    if type != "STB" and decoder:
+        dir = dir / "Decoder"
+    elif type != "STB" and not decoder:
+        dir = dir / "Generator"
     torch.save(dataset, dir / "dataset.pt")
 
 
-def createGraphs(type: str):
-    createGraphDataset("train", type)
-    createGraphDataset("val", type)
-    createGraphDataset("test", type)
+def createGraphs(type: str, decoder=True):
+    createGraphDataset("train", type, decoder)
+    createGraphDataset("val", type, decoder)
+    createGraphDataset("test", type, decoder)
 
 
+print("Starting STB Graph Generation.")
 createGraphs("STB")
-createGraphs("Stereo")
+print("STB Graph Generation Complete.")
+
+
+print("Starting Stereo Graph Generation.")
+createGraphs("Stereo")  # Create decoder dataset for post training
+createGraphs("Stereo", decoder=False)  # Create generator dataset
+print("Stereo Graph Generation Complete.")

@@ -7,8 +7,9 @@ from model import AnatomyModel
 from torch import nn
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
+from posttrainer import Trainer
 
-with open("/home/miket/decconfigs.json", "r") as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/decconfigs.json", "r") as f:
     configs = json.load(f)
 
 
@@ -50,6 +51,7 @@ test_loader = DataLoader(
     drop_last=configs["drop_last"],
     collate_fn=collate,
 )
+standardize = Trainer().standardize
 
 
 def evalModel():
@@ -65,6 +67,7 @@ def evalModel():
             coords_proj = coords_proj.to(device)
 
             features = batch.x
+            features = standardize(features)
             edge_index = batch.edge_index
             b = batch.batch
 

@@ -23,7 +23,7 @@ class GraphAttentionNet(nn.Module):
 
     def forward(self, features, edge_index, batch):
         if features.dim() == 3:
-            features = features.flatten(0, 1)  # Flatten to shape (B * 21, 7)
+            features = features.flatten(0, 1)  # Flatten to shape (B * 21, 19)
 
         features = self.elu(self.gat1(features, edge_index))
         features = self.elu(self.gat2(features, edge_index))

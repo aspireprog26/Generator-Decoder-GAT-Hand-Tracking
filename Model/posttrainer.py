@@ -31,8 +31,19 @@ class Trainer:
         min_delta = configs["es_thresh"]
         patience = configs["es_patience"]
 
+        decoder_stats = torch.load(
+            Path(configs["stereo_data_dir"]) / "Training" / "Decoder" / "stats.pt",
+            weights_only=False,
+        )
+        self.decoder_mean = decoder_stats[0].to(self.device, dtype=torch.float32)
+        self.decoder_std = decoder_stats[1].to(self.device, dtype=torch.float32)
+
         model_save_path = Path(configs["model_dir"]) / configs["model_name"]
         self.early_stopper = es.EarlyStopping(patience, min_delta, model_save_path)
+
+    def standardize(self, features):
+        stand_feats = (features - self.decoder_mean) / self.decoder_std
+        return stand_feats
 
     def train(self):
         for epoch in range(self.num_epochs):
@@ -45,6 +56,7 @@ class Trainer:
                 coords_proj = coords_proj.to(self.device)
 
                 features = batch.x
+                features = self.standardize(features)
                 edge_index = batch.edge_index
                 b = batch.batch
 
@@ -69,6 +81,7 @@ class Trainer:
                     coords_proj = coords_proj.to(self.device)
 
                     features = batch.x
+                    features = self.standardize(features)
                     edge_index = batch.edge_index
                     b = batch.batch
 
