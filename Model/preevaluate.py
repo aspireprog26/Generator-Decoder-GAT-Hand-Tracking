@@ -71,7 +71,7 @@ def collateGenerator(batch):
     return (batch, targets, raw_coords)
 
 
-decoder_test_dataset = torch.load(Path(configs["data_dir"]) / "Testing" / "dataset.pt")
+decoder_test_dataset = torch.load(Path(configs["stb_dir"]) / "Testing" / "dataset.pt")
 decoder_test_loader = DataLoader(
     dataset=decoder_test_dataset,
     num_workers=configs["num_workers"],
@@ -81,7 +81,7 @@ decoder_test_loader = DataLoader(
 )
 
 generator_test_dataset = torch.load(
-    Path(configs["post_data_dir"]) / "Testing" / "dataset.pt"
+    Path(configs["stereo_data_dir"]) / "Testing" / "Generator" / "dataset.pt"
 )
 generator_test_loader = DataLoader(
     dataset=generator_test_dataset,
@@ -97,12 +97,12 @@ decoder_criterion = MSELoss()
 generator_criterion = gc
 
 chol_row = torch.load(
-    Path(configs["post_data_dir"]) / "cholrow.pt",
+    Path(configs["stereo_data_dir"]) / "cholrow.pt",
     weights_only=False,
 ).to(device)
 
 chol_col = torch.load(
-    Path(configs["post_data_dir"]) / "cholcol.pt",
+    Path(configs["stereo_data_dir"]) / "cholcol.pt",
     weights_only=False,
 ).to(device)
 
