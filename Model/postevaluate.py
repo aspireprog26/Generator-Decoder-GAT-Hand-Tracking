@@ -43,7 +43,7 @@ weights = torch.load(
 model.load_state_dict(weights)
 model.eval()
 
-test_dataset = torch.load(Path(configs["post_data_dir"]) / "Testing" / "dataset.pt")
+test_dataset = torch.load(Path(configs["stereo_data_dir"]) / "Testing" / "dataset.pt")
 test_loader = DataLoader(
     dataset=test_dataset,
     num_workers=configs["num_workers"],
