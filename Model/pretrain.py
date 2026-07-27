@@ -23,6 +23,7 @@ configs = {
     "generator_output_size": 64,
     "num_workers": 2,
     "num_epochs": 100,
+    "delta": 1,
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
@@ -101,7 +102,8 @@ def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
     return nll.mean()
 
 
-decoder_criterion = nn.MSELoss()
+# For post Optuna fine-tuning
+# decoder_criterion = nn.HuberLoss()
 generator_criterion = generatorCriterion
 
 decoder_train_dataset = torch.load(
@@ -164,7 +166,7 @@ def createDataset(batch_size):
     )
 
 
-def train(cfgs: dict, trial=None):
+def train(cfgs: dict, decoder_criterion, trial=None):
     (
         decoder_train_loader,
         decoder_val_loader,
@@ -243,6 +245,7 @@ def objective(trial):
     decoder_hidden_size = trial.suggest_int("decoder_hidden_size", 32, 128, step=16)
     generator_dropout = trial.suggest_float("generator_dropout", 0.1, 0.3)
     decoder_dropout = trial.suggest_float("decoder_dropout", 0.2, 0.4)
+    delta = trial.suggest_float("delta", 0.5, 10, log=True)
     decoder_lr = trial.suggest_float("decoder_lr", 1e-5, 1e-3, log=True)
     generator_lr = trial.suggest_float("generator_lr", 1e-5, 1e-3, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
@@ -251,6 +254,7 @@ def objective(trial):
     scheduler_patience = trial.suggest_int("scheduler_patience", 5, 10)
     num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
 
+    decoder_criterion = nn.HuberLoss(delta=delta)
     trial_configs.update(
         {
             "decoder_lr": decoder_lr,
@@ -259,6 +263,7 @@ def objective(trial):
             "decoder_hidden_size": decoder_hidden_size,
             "generator_dropout": generator_dropout,
             "decoder_dropout": decoder_dropout,
+            "delta": delta,
             "weight_decay": weight_decay,
             "batch_size": batch_size,
             "scheduler_factor": scheduler_factor,
@@ -267,7 +272,7 @@ def objective(trial):
         }
     )
 
-    train_loss, val_loss = train(trial_configs, trial)
+    train_loss, val_loss = train(trial_configs, decoder_criterion, trial)
     print(
         f"\nTrial Number: {trial.number} | Train Loss: {train_loss} | Validation Loss: {val_loss}"
     )
@@ -291,5 +296,6 @@ if __name__ == "__main__":
         saveConfigs(configs, "optunaconfigs")
         train(configs)
     else:
-        train(final_configs)
+        final_decoder_criterion = nn.HuberLoss(delta=final_configs["delta"])
+        train(final_configs, final_decoder_criterion)
         saveConfigs(configs, "decpreconfigs")

@@ -43,6 +43,7 @@ class Trainer:
         self.decoder_criterion = decoder_criterion
         self.generator_criterion = generator_criterion
         self.num_epochs = configs["num_epochs"]
+        self.huber_delta = configs["delta"]
 
         self.gen_model_save_path = (
             Path(configs["model_dir"]) / configs["generator_model_name"]
@@ -265,7 +266,12 @@ class Trainer:
 
                 decoder_loss.backward()
                 self.decoder_optimizer.step()
-                decoder_train_loss += decoder_loss.item() * decoder_batch.num_graphs
+
+                # Compute the euclidean distance loss per keypoints sqrt(dx^2 + dy^2 + dz^2) then average across all the keypoints
+                dist_loss = torch.linalg.norm(
+                    pred_coords - decoder_coords, dim=-1
+                ).mean()
+                decoder_train_loss += dist_loss.item() * decoder_batch.num_graphs
                 dec_samples += decoder_batch.num_graphs
 
             decoder_train_loss /= dec_samples
@@ -319,7 +325,9 @@ class Trainer:
                     errors = errors.view(errors.size(0), 21, 3)
                     pred_coords = coords_proj + (scale[:, None, None] * errors)
 
-                    decoder_loss = self.decoder_criterion(pred_coords, decoder_coords)
+                    decoder_loss = torch.linalg.norm(
+                        pred_coords - decoder_coords, dim=-1
+                    ).mean()
                     decoder_val_loss += decoder_loss.item() * decoder_batch.num_graphs
                     dec_samples += decoder_batch.num_graphs
             decoder_val_loss /= dec_samples
@@ -374,7 +382,13 @@ class Trainer:
             current_dec_lr = self.decoder_optimizer.param_groups[0]["lr"]
             current_gen_lr = self.generator_optimizer.param_groups[0]["lr"]
             print(
-                f"Epoch: {epoch + 1} | DecTL: {decoder_train_loss} | GenTL: {generator_train_loss} | DecVL: {decoder_val_loss} | GenVL: {generator_val_loss} | DecLR: {current_dec_lr: .5f} | GenLR: {current_gen_lr: .5f}"
+                f"Epoch: {epoch + 1} | "
+                f"DecTL: {decoder_train_loss} | "
+                f"GenTL: {generator_train_loss} | "
+                f"DecVL: {decoder_val_loss} | "
+                f"GenVL: {generator_val_loss} | "
+                f"DecLR: {current_dec_lr: .6f} | "
+                f"GenLR: {current_gen_lr: .6f}"
             )
 
             if trial is not None:

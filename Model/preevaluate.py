@@ -5,7 +5,7 @@ import torch
 from model import AnatomyModel
 from pretrain import generator_criterion as gc
 from pretrainer import Trainer
-from torch.nn import MSELoss
+from torch.nn import HuberLoss
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
@@ -93,7 +93,7 @@ generator_test_loader = DataLoader(
 
 features = Trainer().features
 standardize = Trainer().standardize
-decoder_criterion = MSELoss()
+decoder_criterion = HuberLoss(delta=1)
 generator_criterion = gc
 
 chol_row = torch.load(
@@ -162,7 +162,9 @@ def evalModel():
             errors = errors.view(errors.size(0), 21, 3)
             pred_coords = coords_proj + (scale[:, None, None] * errors)
 
-            decoder_loss = decoder_criterion(pred_coords, decoder_coords)
+            decoder_loss = torch.linalg.norm(
+                pred_coords - decoder_coords, dim=-1
+            ).mean()
             decoder_test_loss += decoder_loss.item() * decoder_batch.num_graphs
             dec_samples += decoder_batch.num_graphs
     decoder_test_loss /= dec_samples
