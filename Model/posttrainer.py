@@ -126,12 +126,12 @@ class Trainer:
                 f"LR: {current_lr}"
             )
 
-            if val_loss < self.best_loss - self.min_delta:
-                self.best_loss = val_loss
+            if val_dist < self.best_loss - self.min_delta:
+                self.best_loss = val_dist
                 torch.save(self.model.state_dict(), self.model_save_path)
 
             if trial is not None:
-                trial.report(val_loss, epoch)
+                trial.report(val_dist, epoch)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
