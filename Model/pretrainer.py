@@ -154,6 +154,9 @@ class Trainer:
             (coords - scale[:, None, None] * noise) if noise is not None else coords
         )
         features = self.getFeatures(coords_proj, left_kps, right_kps, eps)
+        scale = torch.linalg.norm(
+            coords_proj[:, 9] - coords_proj[:, 0], dim=-1
+        ).clamp_min(eps)
         return features, coords_proj, scale
 
     def standardize(self, features, decoder: bool = True):

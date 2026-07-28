@@ -49,15 +49,9 @@ configs = {
     "drop_last": False,
 }
 
-dec_pre_configs = configs.copy()
-
-"""
-For fine tuning after optuna trials are complete, uncomment if MODE="train"
+# For fine tuning after optuna trials are complete, MODE="train"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
-    optuna_configs = json.load(f)
-
-dec_pre_configs.update(optuna_configs)
-"""
+    dec_pre_configs = json.load(f)
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
 
