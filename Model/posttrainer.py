@@ -2,7 +2,7 @@ from pathlib import Path
 
 import earlystopper as es
 import torch
-from torch import nn, optim
+from torch import device, nn, optim
 from torch.utils.data import DataLoader
 
 
@@ -13,9 +13,9 @@ class Trainer:
         configs: dict,
         train_loader: DataLoader,
         val_loader: DataLoader,
-        criterion: nn,
         optimizer: optim,
-        scheduler,
+        scheduler: optim,
+        device: device,
     ):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model
@@ -26,6 +26,7 @@ class Trainer:
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.criterion = criterion
+        self.device = device
 
         self.num_epochs = configs["num_epochs"]
         min_delta = configs["es_thresh"]

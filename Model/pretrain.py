@@ -1,6 +1,8 @@
 import json
+import random
 from pathlib import Path
 
+import numpy as np
 import optuna
 import torch
 from model import AnatomyModel
@@ -9,7 +11,17 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-MODE = "optuna"
+# Must use for reproducability
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+
+g = torch.Generator()
+g.manual_seed(SEED)
+
+MODE = "train"
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -38,24 +50,19 @@ configs = {
 }
 
 # For fine tuning after optuna trials are complete
-final_configs = configs.copy()
-final_configs.update(
-    {
-        "generator_hidden_size": 48,
-        "decoder_hidden_size": 64,
-        "generator_dropout": 0.16559856418170624,
-        "decoder_dropout": 0.28671121921324066,
-        "generator_lr": 0.0003870814262152579,
-        "decoder_lr": 0.0003418507,
-        "batch_size": 32,
-        "num_epochs": 120,
-        "scheduler_factor": 0.7,
-        "scheduler_patience": 5,
-        "weight_decay": 0.00449863128,
-    }
-)
+with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
+    optuna_configs = json.load(f)
+
+dec_pre_configs = configs.copy()
+dec_pre_configs.update(optuna_configs)
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
+
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 def saveConfigs(cfgs, name):
@@ -131,6 +138,8 @@ def createDataset(batch_size):
         shuffle=True,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     decoder_val_loader = DataLoader(
@@ -139,6 +148,7 @@ def createDataset(batch_size):
         batch_size=batch_size,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
+        worker_init_fn=seed_worker,
     )
 
     generator_train_loader = DataLoader(
@@ -148,6 +158,8 @@ def createDataset(batch_size):
         shuffle=True,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     generator_val_loader = DataLoader(
@@ -156,6 +168,7 @@ def createDataset(batch_size):
         batch_size=batch_size,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
+        worker_init_fn=seed_worker,
     )
 
     return (
@@ -294,8 +307,9 @@ if __name__ == "__main__":
 
         configs.update(study.best_params)
         saveConfigs(configs, "optunaconfigs")
-        train(configs)
+        final_decoder_criterion = nn.HuberLoss(delta=configs["delta"])
+        train(configs, final_decoder_criterion)
     else:
-        final_decoder_criterion = nn.HuberLoss(delta=final_configs["delta"])
-        train(final_configs, final_decoder_criterion)
-        saveConfigs(configs, "decpreconfigs")
+        final_decoder_criterion = nn.HuberLoss(delta=dec_pre_configs["delta"])
+        train(dec_pre_configs, final_decoder_criterion)
+        saveConfigs(dec_pre_configs, "decpreconfigs")

@@ -1,9 +1,9 @@
 from itertools import cycle
 from pathlib import Path
 
+import numpy as np
 import optuna
 import torch
-from earlystopper import EarlyStopping
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
@@ -52,10 +52,6 @@ class Trainer:
             Path(configs["model_dir"]) / configs["decoder_model_name"]
         )
 
-        self.gen_es = EarlyStopping(
-            configs["es_patience"], configs["es_thresh"], self.gen_model_save_path
-        )
-
         self.chol_row = torch.load(
             Path(configs["stereo_data_dir"]) / "cholrow.pt",
             weights_only=False,
@@ -93,6 +89,8 @@ class Trainer:
         )
         self.generator_mean = generator_stats[0].to(self.device, dtype=torch.float32)
         self.generator_std = generator_stats[1].to(self.device, dtype=torch.float32)
+        self.min_delta = configs["es_thresh"]
+        self.best_loss = np.inf
 
         next_idx = [0]
         for finger in range(5):
@@ -396,15 +394,9 @@ class Trainer:
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
-            """
-            Only use for post optuna fine tuning
-            self.gen_es(generator_val_loss, self.generator_model)
-            if self.gen_es.stopping:
-                print(f"Generator Early Stopping at epoch {epoch} / {self.num_epochs}")
-            """
-
-        torch.save(self.decoder_model.state_dict(), self.dec_model_save_path)
-        # Use for optuna hyperparameter selection
-        torch.save(self.generator_model.state_dict(), self.gen_model_save_path)
+            if decoder_val_loss < self.best_loss - self.min_delta:
+                self.best_loss = decoder_val_loss
+                torch.save(self.decoder_model.state_dict(), self.dec_model_save_path)
+                torch.save(self.generator_model.state_dict(), self.gen_model_save_path)
 
         return decoder_train_loss, decoder_val_loss

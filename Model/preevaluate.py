@@ -1,6 +1,8 @@
 import json
+import random
 from pathlib import Path
 
+import numpy as np
 import torch
 from model import AnatomyModel
 from pretrain import generator_criterion as gc
@@ -16,11 +18,20 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Set seed for eval sampling reproducability
 SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
 torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
 
-if torch.cuda.is_available():
-    torch.cuda.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
+g = torch.Generator()
+g.manual_seed(SEED)
+
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
 
 decoder_model = AnatomyModel(
     configs["input_size"],
@@ -78,6 +89,8 @@ decoder_test_loader = DataLoader(
     batch_size=configs["batch_size"],
     drop_last=configs["drop_last"],
     collate_fn=collateDecoder,
+    worker_init_fn=seed_worker,
+    generator=g,
 )
 
 generator_test_dataset = torch.load(
@@ -89,6 +102,8 @@ generator_test_loader = DataLoader(
     batch_size=configs["batch_size"],
     drop_last=configs["drop_last"],
     collate_fn=collateGenerator,
+    worker_init_fn=seed_worker,
+    generator=g,
 )
 
 features = Trainer().features
