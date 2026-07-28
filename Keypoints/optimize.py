@@ -52,24 +52,11 @@ class Losses:
 
     def hand_point_loss(self, stereo_aligned, target):
         weights = torch.ones(21, device=stereo_aligned.device)
-
-        # Wrist/palm joints
-        weights[[0, 5, 9, 13, 17]] = 1
-
-        # Thumb joints
-        weights[[1, 2, 3, 4]] = 5
-
-        # Index finger
-        weights[[5, 6, 7, 8]] = 2
-
-        # Middle finger
-        weights[[9, 10, 11, 12]] = 5
-
-        # Ring finger
-        weights[[13, 14, 15, 16]] = 1
-
-        # Pinky
-        weights[[17, 18, 19, 20]] = 1
+        weights[[1, 2, 3, 4]] = 5  # thumb
+        weights[[5, 6, 7, 8]] = 2  # index
+        weights[[9, 10, 11, 12]] = 5  # middle
+        weights[[13, 14, 15, 16]] = 1  # ring
+        weights[[17, 18, 19, 20]] = 1  # pinky
 
         diff = stereo_aligned - target
         error = (diff**2).sum(dim=-1)

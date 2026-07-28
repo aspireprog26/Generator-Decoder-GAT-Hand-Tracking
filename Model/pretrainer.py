@@ -49,7 +49,7 @@ class Trainer:
             Path(configs["model_dir"]) / configs["generator_model_name"]
         )
         self.dec_model_save_path = (
-            Path(configs["model_dir"]) / configs["decoder_model_name"]
+            Path(configs["model_dir"]) / f"pre{configs['decoder_model_name']}"
         )
 
         self.chol_row = torch.load(

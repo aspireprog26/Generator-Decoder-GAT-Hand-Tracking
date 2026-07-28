@@ -49,12 +49,15 @@ configs = {
     "drop_last": False,
 }
 
-# For fine tuning after optuna trials are complete
+dec_pre_configs = configs.copy()
+
+"""
+For fine tuning after optuna trials are complete, uncomment if MODE="train"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
     optuna_configs = json.load(f)
 
-dec_pre_configs = configs.copy()
 dec_pre_configs.update(optuna_configs)
+"""
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
 
@@ -97,7 +100,7 @@ def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
     logdet_V = torch.as_tensor(logdet_V, device=device, dtype=dtype)
     log2pi_ = log2pi.to(device=device, dtype=dtype)
 
-    B, m, n = X.shape
+    _, m, n = X.shape
     cov_row = scale[:, None, None] * U
     E = X - M
 
@@ -287,7 +290,9 @@ def objective(trial):
 
     train_loss, val_loss = train(trial_configs, decoder_criterion, trial)
     print(
-        f"\nTrial Number: {trial.number} | Train Loss: {train_loss} | Validation Loss: {val_loss}"
+        f"\nTrial Number: {trial.number} | "
+        f"Train Loss: {train_loss} | "
+        f"Validation Loss: {val_loss}"
     )
     return val_loss
 

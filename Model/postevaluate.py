@@ -1,20 +1,15 @@
 import json
 from pathlib import Path
 
-import numpy as np
 import torch
 from model import AnatomyModel
-from torch import nn
+from posttrain import Loss
+from posttrainer import Trainer
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-from posttrainer import Trainer
 
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decconfigs.json", "r") as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     configs = json.load(f)
-
-
-def nmse(prediction, target):
-    return np.mean((target - prediction) ** 2) / np.var(target)
 
 
 def collate(batch):
@@ -52,43 +47,36 @@ test_loader = DataLoader(
     collate_fn=collate,
 )
 standardize = Trainer().standardize
+criterion = Loss(configs["delta"]).criterion
 
 
 def evalModel():
-    test_mse_loss = 0
-    test_nmse_loss = 0
-    total_samples = 0
+    test_loss = 0
+    test_dist = 0
 
-    criterion = nn.MSELoss()
     with torch.inference_mode():
         for batch, target, coords_proj in test_loader:
             batch = batch.to(device)
             target = target.to(device)
             coords_proj = coords_proj.to(device)
 
-            features = batch.x
+            features = batch.x.to(device, dtype=torch.float32)
             features = standardize(features)
-            edge_index = batch.edge_index
-            b = batch.batch
+            edge_index = batch.edge_index.to(device)
+            b = batch.batch.to(device)
 
-            error = model(features, edge_index, b)
+            errors = model(features, edge_index, b)
+            errors = errors.view(errors.size(0), 21, 3)
             scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
-            pred = coords_proj + (scale[:, None, None] * error)
+            pred = coords_proj + (scale[:, None, None] * errors)
+
             loss = criterion(pred, target)
+            test_loss += loss.item()
 
-            test_mse_loss += loss.item()
-            batch_size = target.size(0)
-            test_nmse_loss += (
-                nmse(pred.cpu().numpy(), target.cpu().numpy()) * batch_size
-            )
-            total_samples += batch_size
-
-    avg_mse_loss = test_mse_loss / len(test_loader)
-    avg_nmse_loss = test_nmse_loss / total_samples
-    return (avg_mse_loss, avg_nmse_loss)
+    test_loss /= len(test_loader)
+    test_dist /= len(test_loader)
+    return test_loss, test_dist
 
 
 evaluation = evalModel()
-print(
-    f"Average MSE Loss Per Batch: {evaluation[0]: .5f} | Average NMSE Loss Per Sample: {evaluation[1]: .5f}"
-)
+print(f"Test Loss {evaluation[0]: .6f} | Test Dist Loss {evaluation[1]: .6f}")

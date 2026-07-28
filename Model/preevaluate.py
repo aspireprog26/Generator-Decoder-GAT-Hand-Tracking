@@ -215,7 +215,6 @@ def evalModel():
             generator_test_loss += generator_loss.item() * generator_batch.num_graphs
             gen_samples += generator_batch.num_graphs
     generator_test_loss /= gen_samples
-
     return decoder_test_loss, generator_test_loss
 
 

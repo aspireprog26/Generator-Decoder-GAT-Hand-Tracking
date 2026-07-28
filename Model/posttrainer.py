@@ -1,6 +1,8 @@
 from pathlib import Path
 
-import earlystopper as es
+# import earlystopper as es
+import numpy as np
+import optuna
 import torch
 from torch import device, nn, optim
 from torch.utils.data import DataLoader
@@ -15,6 +17,7 @@ class Trainer:
         val_loader: DataLoader,
         optimizer: optim,
         scheduler: optim,
+        criterion: nn,
         device: device,
     ):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,8 +32,8 @@ class Trainer:
         self.device = device
 
         self.num_epochs = configs["num_epochs"]
-        min_delta = configs["es_thresh"]
-        patience = configs["es_patience"]
+        self.min_delta = configs["es_thresh"]
+        # patience = configs["es_patience"]
 
         decoder_stats = torch.load(
             Path(configs["stereo_data_dir"]) / "Training" / "Decoder" / "stats.pt",
@@ -39,41 +42,51 @@ class Trainer:
         self.decoder_mean = decoder_stats[0].to(self.device, dtype=torch.float32)
         self.decoder_std = decoder_stats[1].to(self.device, dtype=torch.float32)
 
-        model_save_path = Path(configs["model_dir"]) / configs["model_name"]
-        self.early_stopper = es.EarlyStopping(patience, min_delta, model_save_path)
+        self.model_save_path = (
+            Path(configs["model_dir"]) / configs["decoder_model_name"]
+        )
+        self.best_loss = np.inf
+        # self.early_stopper = es.EarlyStopping(patience, self.min_delta, model_save_path)
 
     def standardize(self, features):
         stand_feats = (features - self.decoder_mean) / self.decoder_std
         return stand_feats
 
-    def train(self):
+    def train(self, trial):
         for epoch in range(self.num_epochs):
             self.model.train()
             train_loss = 0
+            train_dist = 0
 
             for batch, target, coords_proj in self.train_loader:
                 batch = batch.to(self.device)
                 target = target.to(self.device)
                 coords_proj = coords_proj.to(self.device)
 
-                features = batch.x
+                features = batch.x.to(self.device, dtype=torch.float32)
+                features = features.reshape(batch.num_graphs, 21, 19)
                 features = self.standardize(features)
-                edge_index = batch.edge_index
-                b = batch.batch
+                edge_index = batch.edge_index.to(self.device)
+                b = batch.batch.to(self.device)
 
                 self.optimizer.zero_grad()
-                error = self.model(features, edge_index, b)
+                errors = self.model(features, edge_index, b)
+                errors = errors.view(errors.size(0), 21, 3)
                 scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
-                pred = coords_proj + (scale[:, None, None] * error)
-                loss = self.criterion(pred, target)
+                pred = coords_proj + (scale[:, None, None] * errors)
+                loss, dist = self.criterion(pred, target)
 
                 loss.backward()
                 self.optimizer.step()
                 train_loss += loss.item()
+                train_dist += dist.item()
+
             train_loss /= len(self.train_loader)
+            train_dist /= len(self.train_loader)
 
             self.model.eval()
             val_loss = 0
+            val_dist = 0
 
             with torch.inference_mode():
                 for batch, target, coords_proj in self.val_loader:
@@ -81,29 +94,51 @@ class Trainer:
                     target = target.to(self.device)
                     coords_proj = coords_proj.to(self.device)
 
-                    features = batch.x
+                    features = batch.x.to(self.device, dtype=torch.float32)
+                    features = features.reshape(batch.num_graphs, 21, 19)
                     features = self.standardize(features)
-                    edge_index = batch.edge_index
-                    b = batch.batch
+                    edge_index = batch.edge_index.to(self.device)
+                    b = batch.batch.to(self.device)
 
-                    error = self.model(features, edge_index, b)
+                    errors = self.model(features, edge_index, b)
+                    errors = errors.view(errors.size(0), 21, 3)
                     scale = torch.linalg.norm(
                         coords_proj[:, 9] - coords_proj[:, 0], dim=1
                     )
-                    pred = coords_proj + (scale[:, None, None] * error)
+                    pred = coords_proj + (scale[:, None, None] * errors)
 
-                    loss = self.criterion(pred, target)
+                    loss, dist = self.criterion(pred, target)
                     val_loss += loss.item()
+                    val_dist += dist.item()
+
             val_loss /= len(self.val_loader)
+            val_dist /= len(self.val_loader)
 
             if self.scheduler is not None:
-                self.scheduler.step(val_loss)
+                self.scheduler.step(val_dist)
             current_lr = self.optimizer.param_groups[0]["lr"]
             print(
-                f"Epoch: {epoch + 1} | Train Loss: {train_loss} | Val Loss: {val_loss} | LR: {current_lr}"
+                f"Epoch: {epoch + 1} | "
+                f"Train Loss: {train_loss} | "
+                f"Train Dist: {train_dist} | "
+                f"Val Loss: {val_loss} | "
+                f"Val Dist: {val_dist} | "
+                f"LR: {current_lr}"
             )
 
+            if val_loss < self.best_loss - self.min_delta:
+                self.best_loss = val_loss
+                torch.save(self.model.state_dict(), self.model_save_path)
+
+            if trial is not None:
+                trial.report(val_loss, epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+            """
             self.early_stopper(val_loss, self.model)
             if self.early_stopper.stopping:
                 print(f"Early Stopping at epoch {epoch + 1} / {self.num_epochs}")
                 break
+            """
+        return train_dist, val_dist
