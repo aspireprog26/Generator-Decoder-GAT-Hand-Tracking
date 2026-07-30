@@ -55,6 +55,7 @@ class Trainer:
     def train(self, trial):
         for epoch in range(self.num_epochs):
             self.model.train()
+            self.model.gat.eval()
             train_loss = 0
             train_dist = 0
 

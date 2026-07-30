@@ -35,18 +35,44 @@ class GraphAttentionNet(nn.Module):
 class Regressor(nn.Module):
     def __init__(self, input_size, output_size, dropout, generator):
         super().__init__()
-        hidden1 = int((2 ** math.floor(math.log2(input_size))) / 2)
-        hidden2 = hidden1 // 2 if generator else hidden1 // 4
+        hidden_size = int((2 ** math.floor(math.log2(input_size))) / 2)
+        hidden2 = hidden_size // 2 if generator else hidden_size // 4
 
-        self.fc1 = nn.Linear(input_size, hidden1)
-        self.layer_norm1 = nn.LayerNorm(hidden1)
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.layer_norm1 = nn.LayerNorm(hidden_size)
         self.dropout1 = nn.Dropout(p=dropout)
 
-        self.fc2 = nn.Linear(hidden1, hidden2)
+        self.fc2 = nn.Linear(hidden_size, hidden2)
         self.layer_norm2 = nn.LayerNorm(hidden2)
         self.dropout2 = nn.Dropout(p=dropout)
 
         self.out = nn.Linear(hidden2, output_size)
+        self.gelu = nn.GELU()
+
+    def forward(self, x):
+        x = self.layer_norm1(self.gelu(self.fc1(x)))
+        x = self.dropout1(x)
+
+        x = self.layer_norm2(self.gelu(self.fc2(x)))
+        x = self.dropout2(x)
+
+        out = self.out(x)
+        return out
+
+
+class RegressorPost(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, dropout):
+        super().__init__()
+
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.layer_norm1 = nn.LayerNorm(hidden_size)
+        self.dropout1 = nn.Dropout(p=dropout)
+
+        self.fc2 = nn.Linear(hidden_size, hidden_size // 2)
+        self.layer_norm2 = nn.LayerNorm(hidden_size // 2)
+        self.dropout2 = nn.Dropout(p=dropout)
+
+        self.out = nn.Linear(hidden_size // 2, output_size)
         self.gelu = nn.GELU()
 
     def forward(self, x):

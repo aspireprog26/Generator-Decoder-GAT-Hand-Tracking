@@ -140,7 +140,7 @@ class DatasetOptimizer:
                         if image is None:
                             continue
 
-                        h, w = image.shape[:2]
+                        _, w = image.shape[:2]
                         half = w // 2
 
                         left = image[:, :half]
@@ -226,7 +226,7 @@ class DatasetOptimizer:
                             cv2.IMREAD_COLOR,
                         )
 
-                        h, w = image.shape[:2]
+                        _, w = image.shape[:2]
                         half = w // 2
 
                         left = image[:, :half]
@@ -319,7 +319,6 @@ class DatasetOptimizer:
         torch.save(stats, dir / "stats.pt")
 
     def saveData(self):
-        """
         print("Starting STB Dataset.")
         self.saveSTB(1, 5, self.stb_dir / "Training")
         self.saveSTB(5, 6, self.stb_dir / "Validation")
@@ -330,7 +329,6 @@ class DatasetOptimizer:
         self.stereoSave()
         self.createTrainTestVal()
         print("Stereo Dataset Complete.")
-        """
 
         print("Standardizing Stereo Dataset.")
         self.standardize("Training")
@@ -345,5 +343,5 @@ class DatasetOptimizer:
 
 
 optimizer = DatasetOptimizer(mp=True)
-# optimizer.optimize()
+optimizer.optimize()
 optimizer.saveData()
