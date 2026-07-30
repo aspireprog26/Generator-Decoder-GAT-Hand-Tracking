@@ -116,22 +116,26 @@ class Trainer:
 
             if self.scheduler is not None:
                 self.scheduler.step(val_dist)
-            current_lr = self.optimizer.param_groups[0]["lr"]
+
+            gat_lr = self.optimizer.param_groups[0]["lr"]
+            reg_lr = self.optimizer.param_groups[1]["lr"]
+
             print(
                 f"Epoch: {epoch + 1} | "
                 f"Train Loss: {train_loss} | "
                 f"Train Dist: {train_dist} | "
                 f"Val Loss: {val_loss} | "
                 f"Val Dist: {val_dist} | "
-                f"LR: {current_lr}"
+                f"GAT LR: {gat_lr} | "
+                f"REG LR: {reg_lr}"
             )
 
-            if val_loss < self.best_loss - self.min_delta:
-                self.best_loss = val_loss
+            if val_dist < self.best_loss - self.min_delta:
+                self.best_loss = val_dist
                 torch.save(self.model.state_dict(), self.model_save_path)
 
             if trial is not None:
-                trial.report(val_loss, epoch)
+                trial.report(val_dist, epoch)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import optuna
 import torch
-from model import AnatomyModel
-from posttrainer import Trainer
+from model import AnatomyModel, RegressorPost
+from Model.posttrainerreg import Trainer
 from pretrain import saveConfigs
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -94,9 +94,20 @@ class Loss:
 
 MODE = "optuna"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
-    dec_pre_configs = json.load(f)
+    dec_post_configs = json.load(f)
 
-dec_post_configs = dec_pre_configs.copy()
+dec_post_configs.update({"es_thresh": 0.02})
+configs_pop = [
+    "generator_lr",
+    "generator_dropout",
+    "generator_hidden_size",
+    "generator_output_size",
+    "generator_model_name",
+    "stb_dir",
+]
+
+for config in configs_pop:
+    dec_post_configs.pop(config)
 
 """
 For fine tuning after trials
@@ -116,12 +127,12 @@ def collate(batch):
 
 
 train_dataset = torch.load(
-    Path(dec_pre_configs["stereo_data_dir"]) / "Training" / "Decoder" / "dataset.pt",
+    Path(dec_post_configs["stereo_data_dir"]) / "Training" / "Decoder" / "dataset.pt",
     weights_only=False,
 )
 
 val_dataset = torch.load(
-    Path(dec_pre_configs["stereo_data_dir"]) / "Validation" / "Decoder" / "dataset.pt",
+    Path(dec_post_configs["stereo_data_dir"]) / "Validation" / "Decoder" / "dataset.pt",
     weights_only=False,
 )
 
@@ -129,17 +140,17 @@ val_dataset = torch.load(
 def createDataset(batch_size):
     train_loader = DataLoader(
         dataset=train_dataset,
-        num_workers=dec_pre_configs["num_workers"],
+        num_workers=dec_post_configs["num_workers"],
         batch_size=batch_size,
         shuffle=True,
-        drop_last=dec_pre_configs["drop_last"],
+        drop_last=dec_post_configs["drop_last"],
         collate_fn=collate,
     )
     val_loader = DataLoader(
         dataset=val_dataset,
-        num_workers=dec_pre_configs["num_workers"],
+        num_workers=dec_post_configs["num_workers"],
         batch_size=batch_size,
-        drop_last=dec_pre_configs["drop_last"],
+        drop_last=dec_post_configs["drop_last"],
         collate_fn=collate,
     )
     return train_loader, val_loader
@@ -161,11 +172,27 @@ def train(cfgs: dict, criterion, trial=None):
         weights_only=True,
         map_location=device,
     )
-    model.load_state_dict(weights)
+    gat_weights = {k: v for k, v in weights.items() if k.startswith("gat.")}
+    model.load_state_dict(gat_weights, strict=False)
+
+    for param in model.gat.parameters():
+        param.requires_grad = True
+
+    model.regressor = RegressorPost(
+        21 * cfgs["decoder_hidden_size"],
+        cfgs["regressor_hidden"],
+        cfgs["decoder_output_size"],
+        cfgs["regressor_dropout"],
+    ).to(device)
 
     optimizer = optim.AdamW(
-        model.parameters(),
-        lr=cfgs["decoder_lr"],
+        [
+            {
+                "params": model.gat.parameters(),
+                "lr": cfgs["regressor_lr"] * cfgs["gat_lr_factor"],
+            },
+            {"params": model.regressor.parameters(), "lr": cfgs["regressor_lr"]},
+        ],
         weight_decay=cfgs["weight_decay"],
     )
 
@@ -173,8 +200,8 @@ def train(cfgs: dict, criterion, trial=None):
         optimizer,
         mode="min",
         min_lr=1e-6,
-        factor=cfgs["scheduler_factor"],
-        patience=cfgs["scheduler_patience"],
+        factor=cfgs["regressor_scheduler_factor"],
+        patience=cfgs["regressor_scheduler_patience"],
         threshold=cfgs["es_thresh"],
     )
 
@@ -186,9 +213,14 @@ def train(cfgs: dict, criterion, trial=None):
 
 
 def objective(trial):
-    trial_configs = dec_pre_configs.copy()
-    num_epochs = trial.suggest_int("num_epochs", 30, 150, step=5)
-    decoder_dropout = trial.suggest_float("decoder_dropout", 0, 0.6)
+    trial_configs = dec_post_configs.copy()
+    num_epochs = trial.suggest_int("num_epochs", 30, 250, step=10)
+    regressor_dropout = trial.suggest_float("regressor_dropout", 0, 0.7)
+    regressor_hidden = trial.suggest_int("regressor_hidden", 128, 256, step=16)
+    reg_scheduler_factor = trial.suggest_float("regressor_scheduler_factor", 0.1, 0.7)
+    reg_scheduler_patience = trial.suggest_int("regressor_scheduler_patience", 5, 10)
+    gat_lr_factor = trial.suggest_float("gat_lr_factor", 0.05, 1, log=True)
+    regressor_lr = trial.suggest_float("regressor_lr", 1e-5, 1e-3, log=True)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     delta = trial.suggest_float("delta", 0.5, 10, log=True)
@@ -197,7 +229,12 @@ def objective(trial):
     trial_configs.update(
         {
             "num_epochs": num_epochs,
-            "decoder_dropout": decoder_dropout,
+            "regressor_dropout": regressor_dropout,
+            "regressor_hidden": regressor_hidden,
+            "regressor_scheduler_factor": reg_scheduler_factor,
+            "gat_lr_factor": gat_lr_factor,
+            "regressor_scheduler_patience": reg_scheduler_patience,
+            "regressor_lr": regressor_lr,
             "batch_size": batch_size,
             "weight_decay": weight_decay,
             "delta": delta,
@@ -217,19 +254,19 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
         )
-        study.optimize(objective, n_trials=75)
+        study.optimize(objective, n_trials=100)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
         for key, value in study.best_params.items():
             print(f"{key}: {value}")
 
-        dec_pre_configs.update(study.best_params)
-        saveConfigs(dec_pre_configs, "decpostconfigs")
-        final_criterion = Loss(dec_pre_configs["delta"]).criterion
-        train(dec_pre_configs, final_criterion)
+        dec_post_configs.update(study.best_params)
+        saveConfigs(dec_post_configs, "decpostconfigs")
+        final_criterion = Loss(dec_post_configs["delta"]).criterion
+        train(dec_post_configs, final_criterion)
     else:
         final_criterion = Loss(dec_post_configs["delta"]).criterion
         train(dec_post_configs, final_criterion)

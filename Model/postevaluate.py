@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from model import AnatomyModel
 from posttrain import Loss
-from posttrainer import Trainer
+from Model.posttrainerreg import Trainer
 from pretrainer import Trainer as PreTrainer
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
