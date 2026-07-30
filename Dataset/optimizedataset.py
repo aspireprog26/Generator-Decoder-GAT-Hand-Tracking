@@ -140,7 +140,7 @@ class DatasetOptimizer:
                         if image is None:
                             continue
 
-                        h, w = image.shape[:2]
+                        _, w = image.shape[:2]
                         half = w // 2
 
                         left = image[:, :half]
@@ -226,7 +226,7 @@ class DatasetOptimizer:
                             cv2.IMREAD_COLOR,
                         )
 
-                        h, w = image.shape[:2]
+                        _, w = image.shape[:2]
                         half = w // 2
 
                         left = image[:, :half]

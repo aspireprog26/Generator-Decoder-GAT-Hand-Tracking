@@ -1,9 +1,9 @@
 from itertools import cycle
 from pathlib import Path
 
+import numpy as np
 import optuna
 import torch
-from earlystopper import EarlyStopping
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
@@ -43,16 +43,13 @@ class Trainer:
         self.decoder_criterion = decoder_criterion
         self.generator_criterion = generator_criterion
         self.num_epochs = configs["num_epochs"]
+        self.huber_delta = configs["delta"]
 
         self.gen_model_save_path = (
             Path(configs["model_dir"]) / configs["generator_model_name"]
         )
         self.dec_model_save_path = (
-            Path(configs["model_dir"]) / configs["decoder_model_name"]
-        )
-
-        self.gen_es = EarlyStopping(
-            configs["es_patience"], configs["es_thresh"], self.gen_model_save_path
+            Path(configs["model_dir"]) / f"pre{configs['decoder_model_name']}"
         )
 
         self.chol_row = torch.load(
@@ -92,6 +89,8 @@ class Trainer:
         )
         self.generator_mean = generator_stats[0].to(self.device, dtype=torch.float32)
         self.generator_std = generator_stats[1].to(self.device, dtype=torch.float32)
+        self.min_delta = configs["es_thresh"]
+        self.best_loss = np.inf
 
         next_idx = [0]
         for finger in range(5):
@@ -155,6 +154,9 @@ class Trainer:
             (coords - scale[:, None, None] * noise) if noise is not None else coords
         )
         features = self.getFeatures(coords_proj, left_kps, right_kps, eps)
+        scale = torch.linalg.norm(
+            coords_proj[:, 9] - coords_proj[:, 0], dim=-1
+        ).clamp_min(eps)
         return features, coords_proj, scale
 
     def standardize(self, features, decoder: bool = True):
@@ -265,7 +267,12 @@ class Trainer:
 
                 decoder_loss.backward()
                 self.decoder_optimizer.step()
-                decoder_train_loss += decoder_loss.item() * decoder_batch.num_graphs
+
+                # Compute the euclidean distance loss per keypoints sqrt(dx^2 + dy^2 + dz^2) then average across all the keypoints
+                dist_loss = torch.linalg.norm(
+                    pred_coords - decoder_coords, dim=-1
+                ).mean()
+                decoder_train_loss += dist_loss.item() * decoder_batch.num_graphs
                 dec_samples += decoder_batch.num_graphs
 
             decoder_train_loss /= dec_samples
@@ -319,7 +326,9 @@ class Trainer:
                     errors = errors.view(errors.size(0), 21, 3)
                     pred_coords = coords_proj + (scale[:, None, None] * errors)
 
-                    decoder_loss = self.decoder_criterion(pred_coords, decoder_coords)
+                    decoder_loss = torch.linalg.norm(
+                        pred_coords - decoder_coords, dim=-1
+                    ).mean()
                     decoder_val_loss += decoder_loss.item() * decoder_batch.num_graphs
                     dec_samples += decoder_batch.num_graphs
             decoder_val_loss /= dec_samples
@@ -374,7 +383,13 @@ class Trainer:
             current_dec_lr = self.decoder_optimizer.param_groups[0]["lr"]
             current_gen_lr = self.generator_optimizer.param_groups[0]["lr"]
             print(
-                f"Epoch: {epoch + 1} | DecTL: {decoder_train_loss} | GenTL: {generator_train_loss} | DecVL: {decoder_val_loss} | GenVL: {generator_val_loss} | DecLR: {current_dec_lr: .5f} | GenLR: {current_gen_lr: .5f}"
+                f"Epoch: {epoch + 1} | "
+                f"DecTL: {decoder_train_loss} | "
+                f"GenTL: {generator_train_loss} | "
+                f"DecVL: {decoder_val_loss} | "
+                f"GenVL: {generator_val_loss} | "
+                f"DecLR: {current_dec_lr: .6f} | "
+                f"GenLR: {current_gen_lr: .6f}"
             )
 
             if trial is not None:
@@ -382,15 +397,9 @@ class Trainer:
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
-            """
-            Only use for post optuna fine tuning
-            self.gen_es(generator_val_loss, self.generator_model)
-            if self.gen_es.stopping:
-                print(f"Generator Early Stopping at epoch {epoch} / {self.num_epochs}")
-            """
-
-        torch.save(self.decoder_model.state_dict(), self.dec_model_save_path)
-        # Use for optuna hyperparameter selection
-        torch.save(self.generator_model.state_dict(), self.gen_model_save_path)
+            if decoder_val_loss < self.best_loss - self.min_delta:
+                self.best_loss = decoder_val_loss
+                torch.save(self.decoder_model.state_dict(), self.dec_model_save_path)
+                torch.save(self.generator_model.state_dict(), self.gen_model_save_path)
 
         return decoder_train_loss, decoder_val_loss

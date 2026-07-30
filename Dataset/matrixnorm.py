@@ -7,9 +7,9 @@ import torch
 class MatrixNorm:
     def __init__(self):
         self.data_dir = Path("/home/miket/Documents/StereoDataset")
-        self.types = ["Clean", "Noisy"]
+        self.types = ["Training", "Testing", "Validation"]
 
-    def fitMN(self, X: np.ndarray, max_iter=300, tol=1e-6, reg=1e-8, verbose=True):
+    def fitMN(self, X: np.ndarray, max_iter=300, tol=1e-6, reg=1e-6, verbose=True):
         n, p, q = X.shape
         U = np.eye(p)
         V = np.eye(q)
@@ -54,9 +54,14 @@ class MatrixNorm:
 
     def saveErrorCov(self):
         errors = []
-        for type_ in self.types:
-            for pt in (self.data_dir / f"{type_}Normalized").glob("*.pt"):
-                error = torch.load(pt)[3].numpy()
+        for type in self.types:
+            for pt in (self.data_dir / type).glob("*.pt"):
+                coords, _, _, coords_optim = torch.load(pt, weights_only=False)
+                coords = coords.detach().cpu().numpy()
+                coords_optim = coords_optim.detach().cpu().numpy()
+                scale = np.linalg.norm(coords_optim[9] - coords_optim[0])
+
+                error = np.array((coords_optim - coords) / scale)
                 errors.append(error)
         errors = np.stack(errors)
 

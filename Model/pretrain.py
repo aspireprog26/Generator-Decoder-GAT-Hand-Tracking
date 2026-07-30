@@ -1,6 +1,8 @@
 import json
+import random
 from pathlib import Path
 
+import numpy as np
 import optuna
 import torch
 from model import AnatomyModel
@@ -9,7 +11,17 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
-MODE = "optuna"
+# Must use for reproducability
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+
+g = torch.Generator()
+g.manual_seed(SEED)
+
+MODE = "train"
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -23,6 +35,7 @@ configs = {
     "generator_output_size": 64,
     "num_workers": 2,
     "num_epochs": 100,
+    "delta": 1,
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
@@ -36,25 +49,17 @@ configs = {
     "drop_last": False,
 }
 
-# For fine tuning after optuna trials are complete
-final_configs = configs.copy()
-final_configs.update(
-    {
-        "generator_hidden_size": 48,
-        "decoder_hidden_size": 64,
-        "generator_dropout": 0.16559856418170624,
-        "decoder_dropout": 0.28671121921324066,
-        "generator_lr": 0.0003870814262152579,
-        "decoder_lr": 0.0003418507,
-        "batch_size": 32,
-        "num_epochs": 120,
-        "scheduler_factor": 0.7,
-        "scheduler_patience": 5,
-        "weight_decay": 0.00449863128,
-    }
-)
+# For fine tuning after optuna trials are complete, MODE="train"
+with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
+    dec_pre_configs = json.load(f)
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
+
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 def saveConfigs(cfgs, name):
@@ -89,7 +94,7 @@ def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
     logdet_V = torch.as_tensor(logdet_V, device=device, dtype=dtype)
     log2pi_ = log2pi.to(device=device, dtype=dtype)
 
-    B, m, n = X.shape
+    _, m, n = X.shape
     cov_row = scale[:, None, None] * U
     E = X - M
 
@@ -101,7 +106,8 @@ def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
     return nll.mean()
 
 
-decoder_criterion = nn.MSELoss()
+# For post Optuna fine-tuning
+# decoder_criterion = nn.HuberLoss()
 generator_criterion = generatorCriterion
 
 decoder_train_dataset = torch.load(
@@ -129,6 +135,8 @@ def createDataset(batch_size):
         shuffle=True,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     decoder_val_loader = DataLoader(
@@ -137,6 +145,7 @@ def createDataset(batch_size):
         batch_size=batch_size,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
+        worker_init_fn=seed_worker,
     )
 
     generator_train_loader = DataLoader(
@@ -146,6 +155,8 @@ def createDataset(batch_size):
         shuffle=True,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     generator_val_loader = DataLoader(
@@ -154,6 +165,7 @@ def createDataset(batch_size):
         batch_size=batch_size,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
+        worker_init_fn=seed_worker,
     )
 
     return (
@@ -164,7 +176,7 @@ def createDataset(batch_size):
     )
 
 
-def train(cfgs: dict, trial=None):
+def train(cfgs: dict, decoder_criterion, trial=None):
     (
         decoder_train_loader,
         decoder_val_loader,
@@ -243,6 +255,7 @@ def objective(trial):
     decoder_hidden_size = trial.suggest_int("decoder_hidden_size", 32, 128, step=16)
     generator_dropout = trial.suggest_float("generator_dropout", 0.1, 0.3)
     decoder_dropout = trial.suggest_float("decoder_dropout", 0.2, 0.4)
+    delta = trial.suggest_float("delta", 0.5, 10, log=True)
     decoder_lr = trial.suggest_float("decoder_lr", 1e-5, 1e-3, log=True)
     generator_lr = trial.suggest_float("generator_lr", 1e-5, 1e-3, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
@@ -251,6 +264,7 @@ def objective(trial):
     scheduler_patience = trial.suggest_int("scheduler_patience", 5, 10)
     num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
 
+    decoder_criterion = nn.HuberLoss(delta=delta)
     trial_configs.update(
         {
             "decoder_lr": decoder_lr,
@@ -259,6 +273,7 @@ def objective(trial):
             "decoder_hidden_size": decoder_hidden_size,
             "generator_dropout": generator_dropout,
             "decoder_dropout": decoder_dropout,
+            "delta": delta,
             "weight_decay": weight_decay,
             "batch_size": batch_size,
             "scheduler_factor": scheduler_factor,
@@ -267,9 +282,11 @@ def objective(trial):
         }
     )
 
-    train_loss, val_loss = train(trial_configs, trial)
+    train_loss, val_loss = train(trial_configs, decoder_criterion, trial)
     print(
-        f"\nTrial Number: {trial.number} | Train Loss: {train_loss} | Validation Loss: {val_loss}"
+        f"\nTrial Number: {trial.number} | "
+        f"Train Loss: {train_loss} | "
+        f"Validation Loss: {val_loss}"
     )
     return val_loss
 
@@ -289,7 +306,9 @@ if __name__ == "__main__":
 
         configs.update(study.best_params)
         saveConfigs(configs, "optunaconfigs")
-        train(configs)
+        final_decoder_criterion = nn.HuberLoss(delta=configs["delta"])
+        train(configs, final_decoder_criterion)
     else:
-        train(final_configs)
-        saveConfigs(configs, "decpreconfigs")
+        final_decoder_criterion = nn.HuberLoss(delta=dec_pre_configs["delta"])
+        train(dec_pre_configs, final_decoder_criterion)
+        saveConfigs(dec_pre_configs, "decpreconfigs")
