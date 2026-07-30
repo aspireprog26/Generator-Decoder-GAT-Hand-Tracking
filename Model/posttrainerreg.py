@@ -43,7 +43,7 @@ class Trainer:
         self.decoder_std = decoder_stats[1].to(self.device, dtype=torch.float32)
 
         self.model_save_path = (
-            Path(configs["model_dir"]) / configs["decoder_model_name"]
+            Path(configs["model_dir"]) / f"{configs['decoder_model_name']}reg"
         )
         self.best_loss = np.inf
         # self.early_stopper = es.EarlyStopping(patience, self.min_delta, model_save_path)
@@ -55,8 +55,8 @@ class Trainer:
     def train(self, trial):
         for epoch in range(self.num_epochs):
             self.model.train()
-            train_loss = 0
             train_dist = 0
+            train_anatomy = 0
 
             for batch, target, coords_proj in self.train_loader:
                 batch = batch.to(self.device)
@@ -74,19 +74,19 @@ class Trainer:
                 errors = errors.view(errors.size(0), 21, 3)
                 scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
                 pred = coords_proj + (scale[:, None, None] * errors)
-                loss, dist = self.criterion(pred, target)
+                loss, dist, anatomy_loss = self.criterion(pred, target)
 
                 loss.backward()
                 self.optimizer.step()
-                train_loss += loss.item()
                 train_dist += dist.item()
+                train_anatomy += anatomy_loss.item()
 
-            train_loss /= len(self.train_loader)
             train_dist /= len(self.train_loader)
+            train_anatomy /= len(self.train_loader)
 
             self.model.eval()
-            val_loss = 0
             val_dist = 0
+            val_anatomy = 0
 
             with torch.inference_mode():
                 for batch, target, coords_proj in self.val_loader:
@@ -107,35 +107,35 @@ class Trainer:
                     )
                     pred = coords_proj + (scale[:, None, None] * errors)
 
-                    loss, dist = self.criterion(pred, target)
-                    val_loss += loss.item()
+                    loss, dist, anatomy_loss = self.criterion(pred, target)
                     val_dist += dist.item()
+                    val_anatomy += anatomy_loss.item()
 
-            val_loss /= len(self.val_loader)
             val_dist /= len(self.val_loader)
+            val_anatomy /= len(self.val_loader)
 
             if self.scheduler is not None:
-                self.scheduler.step(val_dist)
+                self.scheduler.step(val_anatomy)
 
             gat_lr = self.optimizer.param_groups[0]["lr"]
             reg_lr = self.optimizer.param_groups[1]["lr"]
 
             print(
                 f"Epoch: {epoch + 1} | "
-                f"Train Loss: {train_loss} | "
-                f"Train Dist: {train_dist} | "
-                f"Val Loss: {val_loss} | "
-                f"Val Dist: {val_dist} | "
-                f"GAT LR: {gat_lr} | "
-                f"REG LR: {reg_lr}"
+                f"T-AL: {train_anatomy: .6f} | "
+                f"T-D: {train_dist: .6f} | "
+                f"V-AL: {val_anatomy: .6f} | "
+                f"V-D: {val_dist: .6f} | "
+                f"G-LR: {gat_lr: .6f} | "
+                f"R-LR: {reg_lr: .6f}"
             )
 
-            if val_dist < self.best_loss - self.min_delta:
-                self.best_loss = val_dist
+            if val_anatomy < self.best_loss - self.min_delta:
+                self.best_loss = val_anatomy
                 torch.save(self.model.state_dict(), self.model_save_path)
 
             if trial is not None:
-                trial.report(val_dist, epoch)
+                trial.report(val_anatomy, epoch)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
@@ -145,4 +145,4 @@ class Trainer:
                 print(f"Early Stopping at epoch {epoch + 1} / {self.num_epochs}")
                 break
             """
-        return train_dist, val_dist
+        return train_anatomy, val_anatomy

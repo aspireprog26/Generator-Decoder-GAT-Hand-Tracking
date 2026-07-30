@@ -5,7 +5,7 @@ from pathlib import Path
 import optuna
 import torch
 from model import AnatomyModel, RegressorPost
-from Model.posttrainerreg import Trainer
+from posttrainerreg import Trainer
 from pretrain import saveConfigs
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -21,8 +21,8 @@ class Loss:
         self.angles = ANGLE_JOINTS
         self.delta = delta
 
-        self.w1 = 0.7
-        self.w2 = 0.3
+        self.w1 = 0.4
+        self.w2 = 0.6
 
     def distHuber(self, pred, target):
         dist = torch.linalg.norm(pred - target, dim=-1)
@@ -89,14 +89,13 @@ class Loss:
             + self.handPointLoss(pred, target)
         )
         loss = self.w1 * dist_loss + self.w2 * anatomy_loss
-        return loss, dist_mean
+        return loss, dist_mean, anatomy_loss - self.handPointLoss(pred, target)
 
 
 MODE = "optuna"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
 
-dec_post_configs.update({"es_thresh": 0.02})
 configs_pop = [
     "generator_lr",
     "generator_dropout",
@@ -208,8 +207,8 @@ def train(cfgs: dict, criterion, trial=None):
     trainer = Trainer(
         model, cfgs, train_loader, val_loader, optimizer, scheduler, criterion, device
     )
-    train_dist, val_dist = trainer.train(trial)
-    return train_dist, val_dist
+    train_anatomy, val_anatomy = trainer.train(trial)
+    return train_anatomy, val_anatomy
 
 
 def objective(trial):
@@ -241,13 +240,13 @@ def objective(trial):
         }
     )
 
-    train_dist, val_dist = train(trial_configs, criterion, trial)
+    train_anatomy, val_anatomy = train(trial_configs, criterion, trial)
     print(
         f"\nTrial Number: {trial.number} | "
-        f"Train Loss: {train_dist} | "
-        f"Validation Loss: {val_dist}"
+        f"Train Loss: {train_anatomy: .5f} | "
+        f"Validation Loss: {val_anatomy: .5f}"
     )
-    return val_dist
+    return val_anatomy
 
 
 if __name__ == "__main__":
@@ -256,7 +255,7 @@ if __name__ == "__main__":
             direction="minimize",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
         )
-        study.optimize(objective, n_trials=100)
+        study.optimize(objective, n_trials=50)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
@@ -264,10 +263,10 @@ if __name__ == "__main__":
             print(f"{key}: {value}")
 
         dec_post_configs.update(study.best_params)
-        saveConfigs(dec_post_configs, "decpostconfigs")
+        saveConfigs(dec_post_configs, "decpostconfigsreg")
         final_criterion = Loss(dec_post_configs["delta"]).criterion
         train(dec_post_configs, final_criterion)
     else:
         final_criterion = Loss(dec_post_configs["delta"]).criterion
         train(dec_post_configs, final_criterion)
-        saveConfigs(dec_post_configs, "decpostconfigs")
+        saveConfigs(dec_post_configs, "decpostconfigsreg")
