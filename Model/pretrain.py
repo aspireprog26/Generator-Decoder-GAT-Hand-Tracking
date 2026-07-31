@@ -1,3 +1,4 @@
+import sys
 import json
 import random
 from pathlib import Path
@@ -10,6 +11,9 @@ from pretrainer import Trainer
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
+
+sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
+from keypointdetection import HAND_SKELETON, ANGLE_JOINTS  # type: ignore # noqa: I001
 
 # Must use for reproducability
 SEED = 42
@@ -54,6 +58,83 @@ with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r")
     dec_pre_configs = json.load(f)
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
+
+
+class Loss:
+    def __init__(self, delta):
+        self.bones = HAND_SKELETON
+        self.angles = ANGLE_JOINTS
+        self.delta = delta
+
+        self.w1 = 0.4
+        self.w2 = 0.6
+
+    def distHuber(self, pred, target):
+        dist = torch.linalg.norm(pred - target, dim=-1)
+        quadratic = 0.5 * dist**2
+        linear = self.delta * (dist - 0.5 * self.delta)
+        loss = torch.where(dist < self.delta, quadratic, linear)
+        return loss.mean(), dist.mean()
+
+    def boneDirLoss(self, pred, target):
+        loss = 0
+        for parent, child in self.bones:
+            bone_pred = pred[:, child] - pred[:, parent]
+            bone_target = target[:, child] - target[:, parent]
+
+            bone_pred = nn.functional.normalize(bone_pred, dim=-1)
+            bone_target = nn.functional.normalize(bone_target, dim=-1)
+
+            loss += ((bone_pred - bone_target) ** 2).sum(dim=-1)
+        return (loss / len(self.bones)).mean()
+
+    def boneLengthLoss(self, pred, target):
+        loss = 0
+        for parent, child in self.bones:
+            length_pred = torch.linalg.norm(pred[:, child] - pred[:, parent], dim=-1)
+            length_target = torch.linalg.norm(
+                target[:, child] - target[:, parent], dim=-1
+            )
+            loss += (length_target - length_pred) ** 2
+        return (loss / len(self.bones)).mean()
+
+    def angleLoss(self, pred, target):
+        loss = 0
+        for parent, joint, child in self.angles:
+            p1 = pred[:, parent] - pred[:, joint]
+            p2 = pred[:, child] - pred[:, joint]
+
+            t1 = target[:, parent] - target[:, joint]
+            t2 = target[:, child] - target[:, joint]
+
+            cos_pred = nn.functional.cosine_similarity(p1, p2, dim=-1)
+            cos_target = nn.functional.cosine_similarity(t1, t2, dim=-1)
+            loss += (cos_pred - cos_target) ** 2
+        return (loss / len(self.angles)).mean()
+
+    def handPointLoss(self, pred, target):
+        weights = torch.ones(21, device=pred.device)
+        weights[[1, 2, 3, 4]] = 5  # thumb
+        weights[[5, 6, 7, 8]] = 2  # index
+        weights[[9, 10, 11, 12]] = 5  # middle
+        weights[[13, 14, 15, 16]] = 1  # ring
+        weights[[17, 18, 19, 20]] = 1  # pinky
+
+        diff = pred - target
+        error = (diff**2).sum(dim=-1)
+        weighted_error = (error * weights).sum(dim=-1)
+        return (weighted_error / weights.sum()).mean()
+
+    def criterion(self, pred, target):
+        dist_loss, dist_mean = self.distHuber(pred, target)
+        anatomy_loss = (
+            self.boneDirLoss(pred, target)
+            + self.boneLengthLoss(pred, target)
+            + self.angleLoss(pred, target)
+            + self.handPointLoss(pred, target)
+        )
+        loss = self.w1 * dist_loss + self.w2 * anatomy_loss
+        return loss, dist_mean
 
 
 def seed_worker(worker_id):
@@ -106,8 +187,6 @@ def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
     return nll.mean()
 
 
-# For post Optuna fine-tuning
-# decoder_criterion = nn.HuberLoss()
 generator_criterion = generatorCriterion
 
 decoder_train_dataset = torch.load(
@@ -245,8 +324,8 @@ def train(cfgs: dict, decoder_criterion, trial=None):
         decoder_scheduler,
         generator_scheduler,
     )
-    train_loss, val_loss = trainer.train(trial)
-    return train_loss, val_loss
+    train_loss, val_loss, train_dist, val_dist = trainer.train(trial)
+    return train_loss, val_loss, train_dist, val_dist
 
 
 def objective(trial):
@@ -282,11 +361,15 @@ def objective(trial):
         }
     )
 
-    train_loss, val_loss = train(trial_configs, decoder_criterion, trial)
+    train_loss, val_loss, train_dist, val_dist = train(
+        trial_configs, decoder_criterion, trial
+    )
     print(
         f"\nTrial Number: {trial.number} | "
-        f"Train Loss: {train_loss} | "
-        f"Validation Loss: {val_loss}"
+        f"Train Loss: {train_loss: .4f} | "
+        f"Train Anatomy: {train_dist: .4f} | "
+        f"Val Loss: {val_loss: .4f} | "
+        f"Val Anatomy: {val_dist:.4f}"
     )
     return val_loss
 
@@ -306,9 +389,9 @@ if __name__ == "__main__":
 
         configs.update(study.best_params)
         saveConfigs(configs, "optunaconfigs")
-        final_decoder_criterion = nn.HuberLoss(delta=configs["delta"])
+        final_decoder_criterion = Loss(delta=configs["delta"]).criterion
         train(configs, final_decoder_criterion)
     else:
-        final_decoder_criterion = nn.HuberLoss(delta=dec_pre_configs["delta"])
+        final_decoder_criterion = Loss(delta=dec_pre_configs["delta"]).criterion
         train(dec_pre_configs, final_decoder_criterion)
         saveConfigs(dec_pre_configs, "decpreconfigs")

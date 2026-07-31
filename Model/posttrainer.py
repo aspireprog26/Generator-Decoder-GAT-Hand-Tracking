@@ -57,6 +57,7 @@ class Trainer:
             self.model.train()
             train_dist = 0
             train_anatomy = 0
+            train_samples = 0
 
             for batch, target, coords_proj in self.train_loader:
                 batch = batch.to(self.device)
@@ -78,15 +79,17 @@ class Trainer:
 
                 loss.backward()
                 self.optimizer.step()
-                train_dist += dist.item()
-                train_anatomy += anatomy_loss.item()
+                train_dist += dist.item() * batch.num_graphs
+                train_anatomy += anatomy_loss.item() * batch.num_graphs
+                train_samples += batch.num_graphs
 
-            train_dist /= len(self.train_loader)
-            train_anatomy /= len(self.train_loader)
+            train_dist /= train_samples
+            train_anatomy /= train_samples
 
             self.model.eval()
             val_dist = 0
             val_anatomy = 0
+            val_samples = 0
 
             with torch.inference_mode():
                 for batch, target, coords_proj in self.val_loader:
@@ -108,11 +111,12 @@ class Trainer:
                     pred = coords_proj + (scale[:, None, None] * errors)
 
                     _, dist, anatomy_loss = self.criterion(pred, target)
-                    val_dist += dist.item()
-                    val_anatomy += anatomy_loss.item()
+                    val_dist += dist.item() * batch.num_graphs
+                    val_anatomy += anatomy_loss.item() * batch.num_graphs
+                    val_samples += batch.num_graphs
 
-            val_dist /= len(self.val_loader)
-            val_anatomy /= len(self.val_loader)
+            val_dist /= val_samples
+            val_anatomy /= val_samples
 
             if self.scheduler is not None:
                 self.scheduler.step(val_anatomy)
@@ -125,7 +129,7 @@ class Trainer:
                 f"T-D: {train_dist: .6f} | "
                 f"V-AL: {val_anatomy: .6f} | "
                 f"V-D: {val_dist: .6f} | "
-                f"LR: {lr: .6f} | "
+                f"LR: {lr: .6f}"
             )
 
             if val_anatomy < self.best_loss - self.min_delta:

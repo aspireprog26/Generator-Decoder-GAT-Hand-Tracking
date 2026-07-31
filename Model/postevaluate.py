@@ -4,10 +4,10 @@ import time
 from pathlib import Path
 
 import cv2
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from model import AnatomyModel
+from model import AnatomyModel, RegressorPost
 from posttrain import Loss
 from posttrainerreg import Trainer
 from pretrainer import Trainer as PreTrainer
@@ -22,8 +22,13 @@ from keypointdetection import HAND_SKELETON, MediaPipe  # type: ignore
 
 PALM = [0, 1, 5, 9, 13, 17]
 
-sample_eval = False
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
+sample_eval = True
+with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
+    pre_configs = json.load(f)
+
+with open(
+    "/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigsreg.json", "r"
+) as f:
     configs = json.load(f)
 
 
@@ -79,7 +84,24 @@ model = AnatomyModel(
 ).to(device)
 
 weights = torch.load(
-    (Path(configs["model_dir"]) / f"{configs['decoder_model_name']}reg"),
+    (Path(configs["model_dir"]) / f"pre{configs['decoder_model_name']}"),
+    weights_only=True,
+    map_location=device,
+)
+
+
+gat_weights = {k: v for k, v in weights.items() if k.startswith("gat.")}
+model.load_state_dict(gat_weights, strict=False)
+
+model.regressor = RegressorPost(
+    21 * configs["decoder_hidden_size"],
+    configs["regressor_hidden"],
+    configs["decoder_output_size"],
+    configs["regressor_dropout"],
+).to(device)
+
+weights = torch.load(
+    (Path(configs["model_dir"]) / "decoderreg.pth"),
     weights_only=True,
     map_location=device,
 )
@@ -87,7 +109,10 @@ weights = torch.load(
 model.load_state_dict(weights)
 model.eval()
 
-test_dataset = torch.load(Path(configs["stereo_data_dir"]) / "Testing" / "dataset.pt")
+test_dataset = torch.load(
+    Path(configs["stereo_data_dir"]) / "Testing" / "Decoder" / "dataset.pt",
+    weights_only=False,
+)
 test_loader = DataLoader(
     dataset=test_dataset,
     num_workers=configs["num_workers"],
@@ -96,14 +121,29 @@ test_loader = DataLoader(
     collate_fn=collate,
 )
 
-standardize = Trainer().standardize
-feats = PreTrainer().features
+standardize = Trainer(model, configs, None, None, None, None, None, device).standardize
+feats = PreTrainer(
+    pre_configs,
+    None,
+    None,
+    model,
+    model,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+    None,
+).features
 criterion = Loss(configs["delta"]).criterion
 
 
 def evalModel(sample: Path):
     test_anatomy = 0
     test_dist = 0
+    test_samples = 0
     avg_time = 0
 
     if sample is None:
@@ -114,6 +154,7 @@ def evalModel(sample: Path):
                 coords_proj = coords_proj.to(device)
 
                 features = batch.x.to(device, dtype=torch.float32)
+                features = features.reshape(batch.num_graphs, 21, 19)
                 features = standardize(features)
                 edge_index = batch.edge_index.to(device)
                 b = batch.batch.to(device)
@@ -125,18 +166,18 @@ def evalModel(sample: Path):
 
                 _, dist, anatomy = criterion(pred, target)
 
-                """
                 orig_center = coords_proj[:, PALM].mean(dim=1)
                 pred_center = pred[:, PALM].mean(dim=1)
                 translation = orig_center - pred_center
-                pred += translation.unsqueeze(1)
+                # pred += translation.unsqueeze(1)
                 _, dist, _ = criterion(pred, target)
-                """
 
-                test_dist += dist.item()
-                test_anatomy += anatomy.item()
-        test_anatomy /= len(test_loader)
-        test_dist /= len(test_loader)
+                test_dist += dist.item() * batch.num_graphs
+                test_anatomy += anatomy.item() * batch.num_graphs
+                test_samples += batch.num_graphs
+
+        test_anatomy /= test_samples
+        test_dist /= test_samples
     else:
         pose = MediaPipe()
         image = cv2.imread(sample, cv2.IMREAD_COLOR)
@@ -146,8 +187,8 @@ def evalModel(sample: Path):
         left = image[:, :half]
         right = image[:, half:]
 
-        left_kps = torch.tensor(pose.get_keypoints(left))
-        right_kps = torch.tensor(pose.get_keypoints(right))
+        left_kps = pose.get_keypoints(left)
+        right_kps = pose.get_keypoints(right)
 
         fs = cv2.FileStorage(
             "/home/miket/Documents/Hand-Tracking-2/Stereo/stereo.yml",
@@ -181,9 +222,12 @@ def evalModel(sample: Path):
 
         # Plot original points
         plot(points3D)
-        points3D = torch.tensor(points3D)
+        points3D = torch.tensor(points3D).unsqueeze(0).to(device)
+        left_kps = torch.tensor(left_kps).unsqueeze(0).to(device)
+        right_kps = torch.tensor(right_kps).unsqueeze(0).to(device)
 
         feat, coords_proj, scale = feats(points3D, left_kps, right_kps)
+        feat = feat.reshape(1, 21, 19)
         feat = standardize(feat)
 
         edge_index = hand_edge_index.to(device)
@@ -197,7 +241,7 @@ def evalModel(sample: Path):
             pred = coords_proj + (scale[:, None, None] * errors)
             points3D_corr = pred.squeeze(0).cpu().numpy()
 
-        points3D = points3D.numpy()
+        points3D = points3D.squeeze(0).cpu().numpy()
         points3D_center = points3D[PALM].mean(axis=0)
         points3D_corr_center = points3D_corr[PALM].mean(axis=0)
         translation = points3D_center - points3D_corr_center
@@ -222,9 +266,9 @@ def evalModel(sample: Path):
     return test_anatomy, test_dist, avg_time
 
 
-if sample_eval:
+if not sample_eval:
     test_anatomy, test_dist, avg_time = evalModel(None)
     print(f"Test Anatomy Loss {test_anatomy: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
-    _, _, avg_time = evalModel("")
+    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Noisy/3719.jpg")
     print(f"Average Time: {avg_time: .4f}")

@@ -8,6 +8,7 @@ from scipy.io import loadmat
 
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
 from keypointdetection import MediaPipe
+from constrain import OptimizeHands  # type: ignore
 
 # Define the Hand Skeleton connections. Each tuple draws a line between keypoints A and B
 HAND_SKELETON = [
@@ -35,7 +36,7 @@ HAND_SKELETON = [
 
 if __name__ == "__main__":
     pose = MediaPipe()
-    image = cv2.imread("/home/miket/Documents/StereoDataset/Noisy/0542.jpg")
+    image = cv2.imread("/home/miket/Documents/StereoDataset/Noisy/3719.jpg")
     h, w = image.shape[:2]
     half = w // 2
 
@@ -81,6 +82,12 @@ if __name__ == "__main__":
     points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
     points3D = (points4D[:3] / points4D[3]).T * 100
     points3D = np.squeeze(points3D)
+
+    hand_optimizer = OptimizeHands(points3D, left, right)
+    optimized_kps = hand_optimizer.optimize()
+
+    if optimized_kps is not None:
+        points3D = (optimized_kps[0] + optimized_kps[1]) / 2
 
     print(points3D[0])
 

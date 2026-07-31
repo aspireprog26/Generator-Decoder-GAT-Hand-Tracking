@@ -172,6 +172,7 @@ class Trainer:
             self.generator_model.train()
             self.decoder_model.train()
             decoder_train_loss = 0
+            decoder_train_dist = 0
             generator_train_loss = 0
             dec_samples = 0
             gen_samples = 0
@@ -263,25 +264,24 @@ class Trainer:
 
                 errors = errors.view(errors.size(0), 21, 3)
                 pred_coords = coords_proj + (scale[:, None, None] * errors)
-                decoder_loss = self.decoder_criterion(pred_coords, decoder_coords)
+                decoder_loss, dist = self.decoder_criterion(pred_coords, decoder_coords)
 
                 decoder_loss.backward()
                 self.decoder_optimizer.step()
 
-                # Compute the euclidean distance loss per keypoints sqrt(dx^2 + dy^2 + dz^2) then average across all the keypoints
-                dist_loss = torch.linalg.norm(
-                    pred_coords - decoder_coords, dim=-1
-                ).mean()
-                decoder_train_loss += dist_loss.item() * decoder_batch.num_graphs
+                decoder_train_loss += decoder_loss.item() * decoder_batch.num_graphs
+                decoder_train_dist += dist.item() * decoder_batch.num_graphs
                 dec_samples += decoder_batch.num_graphs
 
             decoder_train_loss /= dec_samples
+            decoder_train_dist /= dec_samples
             generator_train_loss /= gen_samples
 
             self.generator_model.eval()
             self.decoder_model.eval()
 
             decoder_val_loss = 0
+            decoder_val_dist = 0
             generator_val_loss = 0
             dec_samples = 0
             gen_samples = 0
@@ -325,13 +325,16 @@ class Trainer:
                     )
                     errors = errors.view(errors.size(0), 21, 3)
                     pred_coords = coords_proj + (scale[:, None, None] * errors)
+                    decoder_loss, dist = self.decoder_criterion(
+                        pred_coords, decoder_coords
+                    )
 
-                    decoder_loss = torch.linalg.norm(
-                        pred_coords - decoder_coords, dim=-1
-                    ).mean()
                     decoder_val_loss += decoder_loss.item() * decoder_batch.num_graphs
+                    decoder_val_dist += dist.item() * decoder_batch.num_graphs
                     dec_samples += decoder_batch.num_graphs
+
             decoder_val_loss /= dec_samples
+            decoder_val_dist /= dec_samples
 
             # Generator Validation
             with torch.inference_mode():
@@ -384,12 +387,14 @@ class Trainer:
             current_gen_lr = self.generator_optimizer.param_groups[0]["lr"]
             print(
                 f"Epoch: {epoch + 1} | "
-                f"DecTL: {decoder_train_loss} | "
-                f"GenTL: {generator_train_loss} | "
-                f"DecVL: {decoder_val_loss} | "
-                f"GenVL: {generator_val_loss} | "
-                f"DecLR: {current_dec_lr: .6f} | "
-                f"GenLR: {current_gen_lr: .6f}"
+                f"DecTL: {decoder_train_loss: .5f} | "
+                f"DecTDL: {decoder_train_dist: .5f} | "
+                f"GenTL: {generator_train_loss: .5f} | "
+                f"DecVL: {decoder_val_loss: .5f} | "
+                f"DecVDL: {decoder_val_dist: .5f} | "
+                f"GenVL: {generator_val_loss: .5f} | "
+                f"DecLR: {current_dec_lr: .5f} | "
+                f"GenLR: {current_gen_lr: .5f}"
             )
 
             if trial is not None:
@@ -402,4 +407,9 @@ class Trainer:
                 torch.save(self.decoder_model.state_dict(), self.dec_model_save_path)
                 torch.save(self.generator_model.state_dict(), self.gen_model_save_path)
 
-        return decoder_train_loss, decoder_val_loss
+        return (
+            decoder_train_loss,
+            decoder_val_loss,
+            decoder_train_dist,
+            decoder_val_dist,
+        )

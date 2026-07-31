@@ -197,7 +197,7 @@ def train(cfgs: dict, criterion, trial=None):
 
 def objective(trial):
     trial_configs = dec_post_configs.copy()
-    num_epochs = trial.suggest_int("num_epochs", 30, 150, step=5)
+    num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
     decoder_dropout = trial.suggest_float("decoder_dropout", 0, 0.6)
     lr_factor = trial.suggest_float("lr_factor", 0.05, 1)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
@@ -229,7 +229,7 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
         )
         study.optimize(objective, n_trials=50)
 
