@@ -1,13 +1,24 @@
+import json
 import sys
+from pathlib import Path
 from threading import Thread
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from pynput import keyboard
 
 sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Keypoints")
+sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Model")
+sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Dataset")
+
+
 import keypointdetection as kp
+from handedgeindex import hand_edge_index
+from model import AnatomyModel
+from posttrainerreg import Trainer
+from pretrainer import Trainer as PreTrainer
 
 CAM = 1
 ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
@@ -30,8 +41,39 @@ class Video:
         self.prev_points3D = None
 
         self.alpha = 0.7
+        self.PALM = [0, 1, 5, 9, 13, 17]
         self.pose_rtm = kp.RTMPose(ENGINE)
         self.pose_mp = kp.MediaPipe()
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.standardize = Trainer().standardize
+        self.feats = PreTrainer().features
+        self.edge_index = hand_edge_index.to(device)
+        self.batch = torch.zeros(21, dtype=torch.long, device=device)
+
+        with open(
+            "/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r"
+        ) as f:
+            configs = json.load(f)
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = AnatomyModel(
+            configs["input_size"],
+            configs["decoder_hidden_size"],
+            configs["decoder_output_size"],
+            configs["decoder_dropout"],
+            generator=False,
+        ).to(device)
+
+        weights = torch.load(
+            (Path(configs["model_dir"]) / f"{configs['decoder_model_name']}reg"),
+            weights_only=True,
+            map_location=device,
+        )
+
+        self.model.load_state_dict(weights)
+        self.model.eval()
 
         self.loadStereoCalib()
         self.setPlotAttr()
@@ -55,31 +97,49 @@ class Video:
 
     def setPlotAttr(self):
         plt.ion()
-
-        self.fig = plt.figure()
-        ax = self.fig.add_subplot(111, projection="3d")
         frame_size = 65
 
-        ax.set_xlim(-frame_size, frame_size)
-        ax.set_ylim(-frame_size, frame_size)
-        ax.set_zlim(0, frame_size)
+        self.fig1 = plt.figure()
+        ax1 = self.fig1.add_subplot(111, projection="3d")
+        ax1.set_xlim(-frame_size, frame_size)
+        ax1.set_ylim(-frame_size, frame_size)
+        ax1.set_zlim(0, frame_size)
+        ax1.zaxis.set_inverted(True)
+        ax1.view_init(elev=220, azim=130, roll=0)
+        ax1.set_xlabel("X")
+        ax1.set_ylabel("Y")
+        ax1.set_zlabel("Z")
 
-        ax.zaxis.set_inverted(True)
-        ax.view_init(elev=220, azim=130, roll=0)
-
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
-
-        self.scatter = ax.scatter(
+        self.scatter1 = ax1.scatter(
             [], [], [], color=(196 / 255, 12 / 255, 27 / 255), s=15, clip_on=True
         )
-        self.lines = []
+        self.lines1 = []
         for _ in kp.HAND_SKELETON:
-            (line,) = ax.plot([], [], [], "b-", clip_on=True)
-            self.lines.append(line)
+            (line,) = ax1.plot([], [], [], "b-", clip_on=True)
+            self.lines1.append(line)
+        plt.figure(self.fig1.number)
+        plt.title("Raw Projected Hand Keypoints")
 
-        plt.title("3D Mapped Hand Skeleton Keypoints (In Centimeters)")
+        self.fig2 = plt.figure()
+        ax2 = self.fig2.add_subplot(111, projection="3d")
+        ax2.set_xlim(-frame_size, frame_size)
+        ax2.set_ylim(-frame_size, frame_size)
+        ax2.set_zlim(0, frame_size)
+        ax2.zaxis.set_inverted(True)
+        ax2.view_init(elev=220, azim=130, roll=0)
+        ax2.set_xlabel("X")
+        ax2.set_ylabel("Y")
+        ax2.set_zlabel("Z")
+
+        self.scatter2 = ax2.scatter(
+            [], [], [], color=(12 / 255, 196 / 255, 27 / 255), s=15, clip_on=True
+        )
+        self.lines2 = []
+        for _ in kp.HAND_SKELETON:
+            (line,) = ax2.plot([], [], [], "g-", clip_on=True)
+            self.lines2.append(line)
+        plt.figure(self.fig2.number)
+        plt.title("Corrected 3D Projected Hand Keypoints")
 
     def ema(self, arr, alpha, prev):
         smoothed = arr * alpha + (1 - alpha) * prev
@@ -94,7 +154,7 @@ class Video:
     def get_frame_rtm(self):
         while self.running:
             if self.last_frame is not None:
-                h, w = self.last_frame.shape[:2]
+                _, w = self.last_frame.shape[:2]
                 half = w // 2
 
                 left = self.last_frame[:, :half]
@@ -153,7 +213,7 @@ class Video:
     def get_frame_mp(self):
         while self.running:
             if self.last_frame is not None:
-                h, w = self.last_frame.shape[:2]
+                _, w = self.last_frame.shape[:2]
                 half = w // 2
 
                 left = self.last_frame[:, :half]
@@ -182,6 +242,13 @@ class Video:
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     self.quit()
                     break
+
+    def computeEma(self, points3D):
+        if self.prev_points3D is None:
+            prev_points3D = points3D.copy()
+        else:
+            prev_points3D = self.ema(points3D, self.alpha, self.prev_points3D)
+        return prev_points3D
 
     def plot3D(self, mode):
         while self.running:
@@ -227,20 +294,14 @@ class Video:
                 )  # Transpose to get shape (N, 3) instead of (3, N) and multiply by 100 for cm
                 points3D = np.squeeze(points3D)
 
-                if self.prev_points3D is None:
-                    self.prev_points3D = points3D.copy()
-                else:
-                    self.prev_points3D = self.ema(
-                        points3D, self.alpha, self.prev_points3D
-                    )
-
-                self.scatter._offsets3d = (
+                # Compute the raw projected points ema
+                self.prev_points3D = self.computeEma(points3D)
+                self.scatter1._offsets3d = (
                     self.prev_points3D[:, 0],
                     self.prev_points3D[:, 1],
                     self.prev_points3D[:, 2],
                 )
-
-                for line, (start, end) in zip(self.lines, kp.HAND_SKELETON):
+                for line, (start, end) in zip(self.lines1, kp.HAND_SKELETON):
                     line.set_data(
                         [self.prev_points3D[start, 0], self.prev_points3D[end, 0]],
                         [self.prev_points3D[start, 1], self.prev_points3D[end, 1]],
@@ -249,8 +310,51 @@ class Video:
                         [self.prev_points3D[start, 2], self.prev_points3D[end, 2]]
                     )
 
-                self.fig.canvas.draw_idle()  # Redraw when ready
-                self.fig.canvas.flush_events()  # Process pending GUI events
+                self.fig1.canvas.draw_idle()
+                self.fig1.canvas.flush_events()
+
+                feat, coords_proj, scale = self.feats(
+                    torch.tensor(points3D),
+                    torch.tensor(pts_left),
+                    torch.tensor(pts_right),
+                )
+                feat = self.standardize(feat)
+
+                with torch.inference_mode():
+                    errors = self.model(feat, self.edge_index, self.batch)
+                    errors = errors.view(1, 21, 3)
+
+                    scale = torch.linalg.norm(
+                        coords_proj[:, 9] - coords_proj[:, 0], dim=-1
+                    )
+                    pred_coords = coords_proj + (scale[:, None, None] * errors)
+                    points3D_corr = pred_coords.squeeze(0).cpu().numpy()
+
+                # Recenter optimized points at centroid of original raw projected hand palm keypoint coordinates
+                points3D_center = points3D[self.PALM].mean(axis=0)
+                points3D_corr_center = points3D_corr[self.PALM].mean(axis=0)
+                translation = points3D_center - points3D_corr_center
+                points3D_corr += translation
+
+                # Compute the corrected points ema
+                self.prev_points3D = self.computeEma(points3D_corr)
+
+                self.scatter2._offsets3d = (
+                    self.prev_points3D[:, 0],
+                    self.prev_points3D[:, 1],
+                    self.prev_points3D[:, 2],
+                )
+                for line, (start, end) in zip(self.lines2, kp.HAND_SKELETON):
+                    line.set_data(
+                        [self.prev_points3D[start, 0], self.prev_points3D[end, 0]],
+                        [self.prev_points3D[start, 1], self.prev_points3D[end, 1]],
+                    )
+                    line.set_3d_properties(
+                        [self.prev_points3D[start, 2], self.prev_points3D[end, 2]]
+                    )
+
+                self.fig2.canvas.draw_idle()
+                self.fig2.canvas.flush_events()
 
     def start(self):
         take_frame_thread = Thread(target=self.take_frame, daemon=True)

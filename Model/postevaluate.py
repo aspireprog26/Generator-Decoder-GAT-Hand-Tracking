@@ -1,5 +1,6 @@
 import json
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -8,15 +9,18 @@ import numpy as np
 import torch
 from model import AnatomyModel
 from posttrain import Loss
-from Model.posttrainerreg import Trainer
+from posttrainerreg import Trainer
 from pretrainer import Trainer as PreTrainer
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Dataset/handedgeindex.py")
+sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Dataset")
+
 from handedgeindex import hand_edge_index  # type: ignore
 from keypointdetection import HAND_SKELETON, MediaPipe  # type: ignore
+
+PALM = [0, 1, 5, 9, 13, 17]
 
 sample_eval = False
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
@@ -31,6 +35,40 @@ def collate(batch):
     return (batch, targets, coords_proj)
 
 
+def plot(points3D, orig=True):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection="3d")
+
+    ax.zaxis.set_inverted(True)
+    ax.view_init(elev=220, azim=130, roll=0)
+
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+
+    ax.scatter(
+        points3D[:, 0],
+        points3D[:, 1],
+        points3D[:, 2],
+        color=(196 / 255, 12 / 255, 27 / 255),
+        s=15,
+    )
+    for start, end in HAND_SKELETON:
+        ax.plot(
+            [points3D[start, 0], points3D[end, 0]],
+            [points3D[start, 1], points3D[end, 1]],
+            [points3D[start, 2], points3D[end, 2]],
+            "b-",
+        )
+    title = (
+        "Raw 3D Projected Stereo Mapped Hand Keypoints"
+        if orig
+        else "Corrected 3D Projected Stereo Mapped Hand Keypoints"
+    )
+    plt.title(title)
+    plt.show()
+
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = AnatomyModel(
     configs["input_size"],
@@ -41,7 +79,7 @@ model = AnatomyModel(
 ).to(device)
 
 weights = torch.load(
-    (Path(configs["model_dir"]) / configs["decoder_model_name"]),
+    (Path(configs["model_dir"]) / f"{configs['decoder_model_name']}reg"),
     weights_only=True,
     map_location=device,
 )
@@ -64,10 +102,11 @@ criterion = Loss(configs["delta"]).criterion
 
 
 def evalModel(sample: Path):
-    test_loss = 0
+    test_anatomy = 0
     test_dist = 0
+    avg_time = 0
 
-    if sample is not None:
+    if sample is None:
         with torch.inference_mode():
             for batch, target, coords_proj in test_loader:
                 batch = batch.to(device)
@@ -84,10 +123,19 @@ def evalModel(sample: Path):
                 scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
                 pred = coords_proj + (scale[:, None, None] * errors)
 
-                loss = criterion(pred, target)
-                test_loss += loss.item()
+                _, dist, anatomy = criterion(pred, target)
 
-        test_loss /= len(test_loader)
+                """
+                orig_center = coords_proj[:, PALM].mean(dim=1)
+                pred_center = pred[:, PALM].mean(dim=1)
+                translation = orig_center - pred_center
+                pred += translation.unsqueeze(1)
+                _, dist, _ = criterion(pred, target)
+                """
+
+                test_dist += dist.item()
+                test_anatomy += anatomy.item()
+        test_anatomy /= len(test_loader)
         test_dist /= len(test_loader)
     else:
         pose = MediaPipe()
@@ -130,6 +178,9 @@ def evalModel(sample: Path):
         points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
         points3D = (points4D[:3] / points4D[3]).T * 100
         points3D = np.squeeze(points3D)
+
+        # Plot original points
+        plot(points3D)
         points3D = torch.tensor(points3D)
 
         feat, coords_proj, scale = feats(points3D, left_kps, right_kps)
@@ -139,45 +190,41 @@ def evalModel(sample: Path):
         batch = torch.zeros(21, dtype=torch.long, device=device)
 
         with torch.inference_mode():
-            errors = model(features, edge_index, batch)  # (1, 63)
+            errors = model(feat, edge_index, batch)
             errors = errors.view(1, 21, 3)
 
             scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=-1)
-            pred_coords = coords_proj + (scale[:, None, None] * errors)
-            points3D = pred_coords.squeeze(0).cpu().numpy()
+            pred = coords_proj + (scale[:, None, None] * errors)
+            points3D_corr = pred.squeeze(0).cpu().numpy()
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection="3d")
+        points3D = points3D.numpy()
+        points3D_center = points3D[PALM].mean(axis=0)
+        points3D_corr_center = points3D_corr[PALM].mean(axis=0)
+        translation = points3D_center - points3D_corr_center
+        points3D_corr += translation
 
-        ax.zaxis.set_inverted(True)
-        ax.view_init(elev=220, azim=130, roll=0)
+        # Compute average inference time
+        t0 = time.time()
+        for _ in range(200):
+            with torch.inference_mode():
+                errors = model(feat, edge_index, batch)
+                errors = errors.view(1, 21, 3)
 
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
+                scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=-1)
+                pred = coords_proj + (scale[:, None, None] * errors)
+                points3D_corr = pred.squeeze(0).cpu().numpy()
+        t1 = time.time()
+        avg_time = (t1 - t0) / 200
 
-        ax.scatter(
-            points3D[:, 0],
-            points3D[:, 1],
-            points3D[:, 2],
-            color=(196 / 255, 12 / 255, 27 / 255),
-            s=15,
-        )
-        for start, end in HAND_SKELETON:
-            ax.plot(
-                [points3D[start, 0], points3D[end, 0]],
-                [points3D[start, 1], points3D[end, 1]],
-                [points3D[start, 2], points3D[end, 2]],
-                "b-",
-            )
-        plt.title("3D Mapped Hand Skeleton Keypoints (In Centimeters)")
-        plt.show()
+        # Plot corrected points
+        plot(points3D_corr, orig=False)
 
-    return test_loss, test_dist
+    return test_anatomy, test_dist, avg_time
 
 
 if sample_eval:
-    evaluation = evalModel(None)
-    print(f"Test Loss {evaluation[0]: .6f} | Test Dist Loss {evaluation[1]: .6f}")
+    test_anatomy, test_dist, avg_time = evalModel(None)
+    print(f"Test Anatomy Loss {test_anatomy: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
-    evalModel("")
+    _, _, avg_time = evalModel("")
+    print(f"Average Time: {avg_time: .4f}")

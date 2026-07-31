@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
-from keypointdetection import ANGLE_JOINTS, HAND_SKELETON  # type: ignore # noqa: E402
+from keypointdetection import ANGLE_JOINTS, HAND_SKELETON  # type: ignore
 
 SANE_COORD_BOUND = 500.0
 BONE_LENGTH_BOUND = 50.0
@@ -29,8 +29,6 @@ def isCatastrophic(coords: np.ndarray):
 
 
 def boneLengthError(coords, target):
-    """Returns mean squared bone-length error (cm^2) across all bones,
-    for a single (21, 3) sample pair."""
     errs = []
     for parent, child in HAND_SKELETON:
         len_pred = torch.linalg.norm(coords[child] - coords[parent])
@@ -40,8 +38,6 @@ def boneLengthError(coords, target):
 
 
 def boneDirError(coords, target):
-    """Returns mean squared bone-direction error (unitless, 0 = perfect
-    direction match) across all bones, for a single (21, 3) sample pair."""
     errs = []
     for parent, child in HAND_SKELETON:
         bone_pred = torch.nn.functional.normalize(
@@ -55,8 +51,6 @@ def boneDirError(coords, target):
 
 
 def angleError(coords, target):
-    """Returns mean squared cosine-similarity error across all tracked
-    joint angles, for a single (21, 3) sample pair."""
     errs = []
     for parent, joint, child in ANGLE_JOINTS:
         p1 = coords[parent] - coords[joint]
@@ -91,7 +85,7 @@ def getAnatomyBaseline(data_dir: str):
     data_dir = Path(data_dir)
     files = sorted(data_dir.glob("*.pt"))
 
-    anatomy_sum = []  # boneLengthLoss + boneDirLoss + angleLoss, matching your Optuna objective
+    anatomy_sum = []
     flagged_count = 0
 
     for pt in files:

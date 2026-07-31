@@ -1,6 +1,6 @@
 from pathlib import Path
 
-# import earlystopper as es
+import earlystopper as es
 import numpy as np
 import optuna
 import torch
@@ -20,7 +20,7 @@ class Trainer:
         criterion: nn,
         device: device,
     ):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.model = model
 
         self.train_loader = train_loader
@@ -33,7 +33,7 @@ class Trainer:
 
         self.num_epochs = configs["num_epochs"]
         self.min_delta = configs["es_thresh"]
-        # patience = configs["es_patience"]
+        patience = configs["es_patience"]
 
         decoder_stats = torch.load(
             Path(configs["stereo_data_dir"]) / "Training" / "Decoder" / "stats.pt",
@@ -46,7 +46,9 @@ class Trainer:
             Path(configs["model_dir"]) / f"{configs['decoder_model_name']}reg"
         )
         self.best_loss = np.inf
-        # self.early_stopper = es.EarlyStopping(patience, self.min_delta, model_save_path)
+        self.early_stopper = es.EarlyStopping(
+            patience, self.min_delta, self.model_save_path
+        )
 
     def standardize(self, features):
         stand_feats = (features - self.decoder_mean) / self.decoder_std
@@ -107,7 +109,7 @@ class Trainer:
                     )
                     pred = coords_proj + (scale[:, None, None] * errors)
 
-                    loss, dist, anatomy_loss = self.criterion(pred, target)
+                    _, dist, anatomy_loss = self.criterion(pred, target)
                     val_dist += dist.item()
                     val_anatomy += anatomy_loss.item()
 
@@ -130,6 +132,7 @@ class Trainer:
                 f"R-LR: {reg_lr: .6f}"
             )
 
+            """
             if val_anatomy < self.best_loss - self.min_delta:
                 self.best_loss = val_anatomy
                 torch.save(self.model.state_dict(), self.model_save_path)
@@ -138,11 +141,11 @@ class Trainer:
                 trial.report(val_anatomy, epoch)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
-
             """
-            self.early_stopper(val_loss, self.model)
+
+            self.early_stopper(val_anatomy, self.model)
             if self.early_stopper.stopping:
                 print(f"Early Stopping at epoch {epoch + 1} / {self.num_epochs}")
                 break
-            """
+
         return train_anatomy, val_anatomy

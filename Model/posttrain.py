@@ -21,8 +21,8 @@ class Loss:
         self.angles = ANGLE_JOINTS
         self.delta = delta
 
-        self.w1 = 0.7
-        self.w2 = 0.3
+        self.w1 = 0.4
+        self.w2 = 0.6
 
     def distHuber(self, pred, target):
         dist = torch.linalg.norm(pred - target, dim=-1)
@@ -89,14 +89,24 @@ class Loss:
             + self.handPointLoss(pred, target)
         )
         loss = self.w1 * dist_loss + self.w2 * anatomy_loss
-        return loss, dist_mean
+        return loss, dist_mean, anatomy_loss - self.handPointLoss(pred, target)
 
 
 MODE = "optuna"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
-    dec_pre_configs = json.load(f)
+    dec_post_configs = json.load(f)
 
-dec_post_configs = dec_pre_configs.copy()
+configs_pop = [
+    "generator_lr",
+    "generator_dropout",
+    "generator_hidden_size",
+    "generator_output_size",
+    "generator_model_name",
+    "stb_dir",
+]
+
+for config in configs_pop:
+    dec_post_configs.pop(config)
 
 """
 For fine tuning after trials
@@ -116,12 +126,12 @@ def collate(batch):
 
 
 train_dataset = torch.load(
-    Path(dec_pre_configs["stereo_data_dir"]) / "Training" / "Decoder" / "dataset.pt",
+    Path(dec_post_configs["stereo_data_dir"]) / "Training" / "Decoder" / "dataset.pt",
     weights_only=False,
 )
 
 val_dataset = torch.load(
-    Path(dec_pre_configs["stereo_data_dir"]) / "Validation" / "Decoder" / "dataset.pt",
+    Path(dec_post_configs["stereo_data_dir"]) / "Validation" / "Decoder" / "dataset.pt",
     weights_only=False,
 )
 
@@ -129,17 +139,17 @@ val_dataset = torch.load(
 def createDataset(batch_size):
     train_loader = DataLoader(
         dataset=train_dataset,
-        num_workers=dec_pre_configs["num_workers"],
+        num_workers=dec_post_configs["num_workers"],
         batch_size=batch_size,
         shuffle=True,
-        drop_last=dec_pre_configs["drop_last"],
+        drop_last=dec_post_configs["drop_last"],
         collate_fn=collate,
     )
     val_loader = DataLoader(
         dataset=val_dataset,
-        num_workers=dec_pre_configs["num_workers"],
+        num_workers=dec_post_configs["num_workers"],
         batch_size=batch_size,
-        drop_last=dec_pre_configs["drop_last"],
+        drop_last=dec_post_configs["drop_last"],
         collate_fn=collate,
     )
     return train_loader, val_loader
@@ -165,7 +175,7 @@ def train(cfgs: dict, criterion, trial=None):
 
     optimizer = optim.AdamW(
         model.parameters(),
-        lr=cfgs["decoder_lr"],
+        lr=cfgs["decoder_lr"] * cfgs["lr_factor"],
         weight_decay=cfgs["weight_decay"],
     )
 
@@ -181,14 +191,15 @@ def train(cfgs: dict, criterion, trial=None):
     trainer = Trainer(
         model, cfgs, train_loader, val_loader, optimizer, scheduler, criterion, device
     )
-    train_dist, val_dist = trainer.train(trial)
-    return train_dist, val_dist
+    train_anatomy, val_anatomy = trainer.train(trial)
+    return train_anatomy, val_anatomy
 
 
 def objective(trial):
-    trial_configs = dec_pre_configs.copy()
+    trial_configs = dec_post_configs.copy()
     num_epochs = trial.suggest_int("num_epochs", 30, 150, step=5)
     decoder_dropout = trial.suggest_float("decoder_dropout", 0, 0.6)
+    lr_factor = trial.suggest_float("lr_factor", 0.05, 1)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     delta = trial.suggest_float("delta", 0.5, 10, log=True)
@@ -200,17 +211,18 @@ def objective(trial):
             "decoder_dropout": decoder_dropout,
             "batch_size": batch_size,
             "weight_decay": weight_decay,
+            "lr_factor": lr_factor,
             "delta": delta,
         }
     )
 
-    train_dist, val_dist = train(trial_configs, criterion, trial)
+    train_anatomy, val_anatomy = train(trial_configs, criterion, trial)
     print(
         f"\nTrial Number: {trial.number} | "
-        f"Train Loss: {train_dist} | "
-        f"Validation Loss: {val_dist}"
+        f"Train Loss: {train_anatomy} | "
+        f"Validation Loss: {val_anatomy}"
     )
-    return val_dist
+    return val_anatomy
 
 
 if __name__ == "__main__":
@@ -219,17 +231,17 @@ if __name__ == "__main__":
             direction="minimize",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
         )
-        study.optimize(objective, n_trials=75)
+        study.optimize(objective, n_trials=50)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
         for key, value in study.best_params.items():
             print(f"{key}: {value}")
 
-        dec_pre_configs.update(study.best_params)
-        saveConfigs(dec_pre_configs, "decpostconfigs")
-        final_criterion = Loss(dec_pre_configs["delta"]).criterion
-        train(dec_pre_configs, final_criterion)
+        dec_post_configs.update(study.best_params)
+        saveConfigs(dec_post_configs, "decpostconfigs")
+        final_criterion = Loss(dec_post_configs["delta"]).criterion
+        train(dec_post_configs, final_criterion)
     else:
         final_criterion = Loss(dec_post_configs["delta"]).criterion
         train(dec_post_configs, final_criterion)
