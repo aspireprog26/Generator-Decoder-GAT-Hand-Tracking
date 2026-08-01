@@ -7,9 +7,9 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from model import AnatomyModel, RegressorPost
+from model import AnatomyModel
 from posttrain import Loss
-from posttrainerreg import Trainer
+from posttrainer import Trainer
 from pretrainer import Trainer as PreTrainer
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
@@ -22,13 +22,9 @@ from keypointdetection import HAND_SKELETON, MediaPipe  # type: ignore
 
 PALM = [0, 1, 5, 9, 13, 17]
 
-sample_eval = True
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
-    pre_configs = json.load(f)
+sample_eval = False
 
-with open(
-    "/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigsreg.json", "r"
-) as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     configs = json.load(f)
 
 
@@ -75,37 +71,23 @@ def plot(points3D, orig=True):
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 model = AnatomyModel(
     configs["input_size"],
     configs["decoder_hidden_size"],
-    configs["decoder_output_size"],
-    configs["decoder_dropout"],
-    generator=False,
+    configs["decoder_hidden1"],
+    configs["generator_output_size"],
+    configs["generator_dropout"],
+    mano_root=configs["mano_root"],
+    generator=True,
+    ncomps=configs["ncomps"],
 ).to(device)
 
 weights = torch.load(
-    (Path(configs["model_dir"]) / f"pre{configs['decoder_model_name']}"),
+    (Path(configs["model_dir"]) / f"{configs['decoder_model_name']}"),
     weights_only=True,
     map_location=device,
 )
-
-
-gat_weights = {k: v for k, v in weights.items() if k.startswith("gat.")}
-model.load_state_dict(gat_weights, strict=False)
-
-model.regressor = RegressorPost(
-    21 * configs["decoder_hidden_size"],
-    configs["regressor_hidden"],
-    configs["decoder_output_size"],
-    configs["regressor_dropout"],
-).to(device)
-
-weights = torch.load(
-    (Path(configs["model_dir"]) / "decoderreg.pth"),
-    weights_only=True,
-    map_location=device,
-)
-
 model.load_state_dict(weights)
 model.eval()
 
@@ -123,7 +105,7 @@ test_loader = DataLoader(
 
 standardize = Trainer(model, configs, None, None, None, None, None, device).standardize
 feats = PreTrainer(
-    pre_configs,
+    configs,
     None,
     None,
     model,
@@ -137,11 +119,18 @@ feats = PreTrainer(
     None,
     None,
 ).features
-criterion = Loss(configs["delta"]).criterion
+criterion = Loss(
+    configs["delta1"],
+    configs["delta2"],
+    configs["w1"],
+    configs["w2"],
+    configs["w3"],
+    configs["w4"],
+).criterion
 
 
 def evalModel(sample: Path):
-    test_anatomy = 0
+    test_loss = 0
     test_dist = 0
     test_samples = 0
     avg_time = 0
@@ -166,17 +155,19 @@ def evalModel(sample: Path):
 
                 _, dist, anatomy = criterion(pred, target)
 
+                """
                 orig_center = coords_proj[:, PALM].mean(dim=1)
                 pred_center = pred[:, PALM].mean(dim=1)
                 translation = orig_center - pred_center
-                # pred += translation.unsqueeze(1)
+                pred += translation.unsqueeze(1)
                 _, dist, _ = criterion(pred, target)
+                """
 
                 test_dist += dist.item() * batch.num_graphs
-                test_anatomy += anatomy.item() * batch.num_graphs
+                test_loss += anatomy.item() * batch.num_graphs
                 test_samples += batch.num_graphs
 
-        test_anatomy /= test_samples
+        test_loss /= test_samples
         test_dist /= test_samples
     else:
         pose = MediaPipe()
@@ -241,11 +232,13 @@ def evalModel(sample: Path):
             pred = coords_proj + (scale[:, None, None] * errors)
             points3D_corr = pred.squeeze(0).cpu().numpy()
 
+        """
         points3D = points3D.squeeze(0).cpu().numpy()
         points3D_center = points3D[PALM].mean(axis=0)
         points3D_corr_center = points3D_corr[PALM].mean(axis=0)
         translation = points3D_center - points3D_corr_center
         points3D_corr += translation
+        """
 
         # Compute average inference time
         t0 = time.time()
@@ -263,12 +256,12 @@ def evalModel(sample: Path):
         # Plot corrected points
         plot(points3D_corr, orig=False)
 
-    return test_anatomy, test_dist, avg_time
+    return test_loss, test_dist, avg_time
 
 
 if not sample_eval:
-    test_anatomy, test_dist, avg_time = evalModel(None)
-    print(f"Test Anatomy Loss {test_anatomy: .6f} | Test Dist Loss {test_dist: .6f}")
+    test_loss, test_dist, avg_time = evalModel(None)
+    print(f"Test Anatomy Loss {test_loss: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
     _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Noisy/3719.jpg")
     print(f"Average Time: {avg_time: .4f}")

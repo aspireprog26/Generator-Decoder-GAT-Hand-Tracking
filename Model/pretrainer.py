@@ -165,7 +165,135 @@ class Trainer:
         stand_feats = (features - mean) / std
         return stand_feats
 
-    def train(self, trial=None):
+    def procrustesAlign(
+        self,
+        X,  # raw 3D keypoint
+        Y,  # MANO predicted 3D keypoints
+        allow_reflection=False,
+        allow_scaling=True,
+        eps=1e-7,
+    ):
+        in_dtype = X.dtype
+
+        # Use float32 for numerical stability
+        X32 = X.float()
+        Y32 = Y.float()
+
+        B, _, D = X32.shape
+
+        # Center point clouds
+        X_mean = X32.mean(dim=1, keepdim=True)
+        Y_mean = Y32.mean(dim=1, keepdim=True)
+
+        X_c = X32 - X_mean
+        Y_c = Y32 - Y_mean
+
+        # Cross covariance
+        M = torch.bmm(X_c.transpose(1, 2), Y_c)
+
+        # SVD
+        U, S, Vh = torch.linalg.svd(M)
+
+        # Rotation
+        if allow_reflection:
+            R = torch.bmm(U, Vh)
+            scale_num = S.sum(dim=-1)
+        else:
+            det = torch.linalg.det(torch.bmm(U, Vh))
+
+            sign = torch.where(
+                det < 0,
+                -torch.ones_like(det),
+                torch.ones_like(det),
+            ).detach()
+
+            Dmat = (
+                torch.eye(
+                    D,
+                    device=X.device,
+                    dtype=torch.float32,
+                )
+                .unsqueeze(0)
+                .repeat(B, 1, 1)
+            )
+
+            Dmat[:, -1, -1] = sign
+            R = torch.bmm(
+                torch.bmm(U, Dmat),
+                Vh,
+            )
+            scale_num = S.sum(dim=-1) - (sign < 0).to(S.dtype) * 2.0 * S[:, -1]
+
+        # Scale
+        if allow_scaling:
+            var_X = (X_c**2).sum(dim=(1, 2))
+            var_X = torch.clamp(var_X, min=eps)
+            s = (scale_num / var_X)[:, None, None]
+        else:
+            s = torch.ones(
+                (B, 1, 1),
+                device=X.device,
+                dtype=torch.float32,
+            )
+
+        # Apply alignment
+        X_aligned = s * torch.bmm(X_c, R) + Y_mean
+        return X_aligned.to(in_dtype)
+
+    def train(self, trial=None, generator_warmup_epochs=10):
+        # Do warmup training of the generator before fully starting decoder training
+        for epoch in range(generator_warmup_epochs):
+            self.generator_model.train()
+            generator_train_loss = 0
+            gen_samples = 0
+
+            for gen_batch, gen_targets, gen_raw in self.generator_train_loader:
+                gen_batch = gen_batch.to(self.device)
+                gen_targets = gen_targets.to(self.device)
+                gen_raw = gen_raw.to(self.device)
+
+                generator_features = gen_batch.x.to(self.device, dtype=torch.float32)
+                generator_edge_index = gen_batch.edge_index.to(self.device)
+                generator_b = gen_batch.batch.to(self.device)
+
+                self.generator_optimizer.zero_grad()
+
+                gen_scale = torch.linalg.norm(
+                    gen_targets[:, 9] - gen_targets[:, 0], dim=1
+                )
+                true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+
+                generator_features = self.standardize(
+                    generator_features.reshape(gen_batch.num_graphs, 21, 19),
+                    decoder=False,
+                )
+                mean_mat, scale = self.generator_model(
+                    generator_features, generator_edge_index, generator_b
+                )
+                mean_mat = mean_mat.reshape(mean_mat.size(0), 21, 3)
+
+                generator_loss = self.generator_criterion(
+                    true_errors,
+                    mean_mat,
+                    scale,
+                    self.cov_row,
+                    self.col_inv,
+                    self.logdet_col,
+                    self.device,
+                )
+                generator_loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.generator_model.parameters(), max_norm=1.0
+                )
+                self.generator_optimizer.step()
+
+                generator_train_loss += generator_loss.item() * gen_batch.num_graphs
+                gen_samples += gen_batch.num_graphs
+
+            print(
+                f"[Warmup] Epoch {epoch + 1} / {generator_warmup_epochs} | GenTL: {generator_train_loss / gen_samples:.5f}"
+            )
+
         for epoch in range(self.num_epochs):
             generator_train_iter = cycle(self.generator_train_loader)
 
@@ -253,17 +381,15 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                normalized_features, coords_proj, scale = self.features(
+                normalized_features, coords_proj, _ = self.features(
                     decoder_coords, left_kps, right_kps, noise
                 )  # Distorted 3D normalized features with noise
                 normalized_features = self.standardize(normalized_features)
 
-                errors = self.decoder_model(
+                pred_coords = self.decoder_model(
                     normalized_features, decoder_edge_index, decoder_b
                 )
-
-                errors = errors.view(errors.size(0), 21, 3)
-                pred_coords = coords_proj + (scale[:, None, None] * errors)
+                pred_coords = self.procrustesAlign(pred_coords, coords_proj)
                 decoder_loss, dist = self.decoder_criterion(pred_coords, decoder_coords)
 
                 decoder_loss.backward()
@@ -315,16 +441,15 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                    normalized_features, coords_proj, scale = self.features(
+                    normalized_features, coords_proj, _ = self.features(
                         decoder_coords, left_kps, right_kps, noise
                     )
                     normalized_features = self.standardize(normalized_features)
 
-                    errors = self.decoder_model(
+                    pred_coords = self.decoder_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
-                    errors = errors.view(errors.size(0), 21, 3)
-                    pred_coords = coords_proj + (scale[:, None, None] * errors)
+                    pred_coords = self.procrustesAlign(pred_coords, coords_proj)
                     decoder_loss, dist = self.decoder_criterion(
                         pred_coords, decoder_coords
                     )

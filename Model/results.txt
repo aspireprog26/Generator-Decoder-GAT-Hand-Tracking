@@ -1,4 +1,0 @@
-With New Regressor Head:
-Epoch: 62 | T-AL:  3.451870 | T-D:  2.688251 | V-AL:  4.591101 | V-D:  2.920354 | G-LR:  0.000140 | R-LR:  0.000142
-
-With Original Model:

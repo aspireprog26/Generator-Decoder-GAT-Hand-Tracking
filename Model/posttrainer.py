@@ -52,6 +52,81 @@ class Trainer:
         stand_feats = (features - self.decoder_mean) / self.decoder_std
         return stand_feats
 
+    def procrustesAlign(
+        self,
+        X,
+        Y,
+        allow_reflection=False,
+        allow_scaling=True,
+        eps=1e-7,
+    ):
+        in_dtype = X.dtype
+
+        # Use float64 for numerical stability
+        X64 = X.double()
+        Y64 = Y.double()
+
+        B, N, D = X64.shape
+
+        # Center point clouds
+        X_mean = X64.mean(dim=1, keepdim=True)
+        Y_mean = Y64.mean(dim=1, keepdim=True)
+
+        X_c = X64 - X_mean
+        Y_c = Y64 - Y_mean
+
+        # Cross covariance
+        M = torch.bmm(X_c.transpose(1, 2), Y_c)
+
+        # SVD
+        U, S, Vh = torch.linalg.svd(M)
+
+        # Rotation
+        if allow_reflection:
+            R = torch.bmm(U, Vh)
+            scale_num = S.sum(dim=-1)
+        else:
+            det = torch.linalg.det(torch.bmm(U, Vh))
+
+            sign = torch.where(
+                det < 0,
+                -torch.ones_like(det),
+                torch.ones_like(det),
+            ).detach()
+
+            Dmat = (
+                torch.eye(
+                    D,
+                    device=X.device,
+                    dtype=torch.float64,
+                )
+                .unsqueeze(0)
+                .repeat(B, 1, 1)
+            )
+
+            Dmat[:, -1, -1] = sign
+            R = torch.bmm(
+                torch.bmm(U, Dmat),
+                Vh,
+            )
+            scale_num = S.sum(dim=-1) - (sign < 0).to(S.dtype) * 2.0 * S[:, -1]
+
+        # Scale
+        if allow_scaling:
+            var_X = (X_c**2).sum(dim=(1, 2))
+            var_X = torch.clamp(var_X, min=eps)
+            s = (scale_num / var_X)[:, None, None]
+        else:
+            s = torch.ones(
+                (B, 1, 1),
+                device=X.device,
+                dtype=torch.float64,
+            )
+
+        # Apply alignment
+        X_aligned = s * torch.bmm(X_c, R) + Y_mean
+        return X_aligned.to(in_dtype)
+
     def train(self, trial):
         for epoch in range(self.num_epochs):
             self.model.train()
@@ -71,16 +146,15 @@ class Trainer:
                 b = batch.batch.to(self.device)
 
                 self.optimizer.zero_grad()
-                errors = self.model(features, edge_index, b)
-                errors = errors.view(errors.size(0), 21, 3)
-                scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
-                pred = coords_proj + (scale[:, None, None] * errors)
-                loss, dist, anatomy_loss = self.criterion(pred, target)
+                pred_coords = self.model(features, edge_index, b)
+                pred_coords = self.procrustesAlign(pred_coords, coords_proj)
+                decoder_loss, dist = self.criterion(pred_coords, target)
 
-                loss.backward()
+                decoder_loss.backward()
                 self.optimizer.step()
+
                 train_dist += dist.item() * batch.num_graphs
-                train_anatomy += anatomy_loss.item() * batch.num_graphs
+                train_anatomy += decoder_loss.item() * batch.num_graphs
                 train_samples += batch.num_graphs
 
             train_dist /= train_samples
@@ -103,16 +177,12 @@ class Trainer:
                     edge_index = batch.edge_index.to(self.device)
                     b = batch.batch.to(self.device)
 
-                    errors = self.model(features, edge_index, b)
-                    errors = errors.view(errors.size(0), 21, 3)
-                    scale = torch.linalg.norm(
-                        coords_proj[:, 9] - coords_proj[:, 0], dim=1
-                    )
-                    pred = coords_proj + (scale[:, None, None] * errors)
+                    pred_coords = self.model(features, edge_index, b)
+                    pred_coords = self.procrustesAlign(pred_coords, coords_proj)
+                    decoder_loss, dist = self.criterion(pred_coords, target)
 
-                    _, dist, anatomy_loss = self.criterion(pred, target)
                     val_dist += dist.item() * batch.num_graphs
-                    val_anatomy += anatomy_loss.item() * batch.num_graphs
+                    val_anatomy += decoder_loss.item() * batch.num_graphs
                     val_samples += batch.num_graphs
 
             val_dist /= val_samples

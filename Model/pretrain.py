@@ -1,4 +1,3 @@
-import sys
 import json
 import random
 from pathlib import Path
@@ -11,9 +10,7 @@ from pretrainer import Trainer
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
-from keypointdetection import HAND_SKELETON, ANGLE_JOINTS  # type: ignore # noqa: I001
+from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
 # Must use for reproducability
 SEED = 42
@@ -25,7 +22,7 @@ torch.cuda.manual_seed_all(SEED)
 g = torch.Generator()
 g.manual_seed(SEED)
 
-MODE = "train"
+MODE = "optuna"
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -34,9 +31,11 @@ configs = {
     "batch_size": 64,
     "input_size": 19,
     "decoder_hidden_size": 32,
-    "generator_hidden_size": 64,
-    "decoder_output_size": 63,
+    "generator_hidden1": 128,
+    "decoder_hidden1": 64,
+    "ncomps": 6,
     "generator_output_size": 64,
+    "decoder_output_size": 22,  # ncomps + 10 + 3 + 3
     "num_workers": 2,
     "num_epochs": 100,
     "delta": 1,
@@ -44,6 +43,7 @@ configs = {
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
     "model_dir": "/home/miket/Documents/Hand-Tracking-2/Model",
+    "mano_root": "/home/miket/Documents/mano/models",
     "stb_dir": "/home/miket/Documents/StereoSTBDataset",
     "stereo_data_dir": "/home/miket/Documents/StereoDataset",
     "es_patience": 10,
@@ -61,19 +61,24 @@ log2pi = torch.log(torch.tensor(2 * torch.pi))
 
 
 class Loss:
-    def __init__(self, delta):
+    def __init__(self, delta1, delta2, w1, w2, w3, w4):
         self.bones = HAND_SKELETON
         self.angles = ANGLE_JOINTS
-        self.delta = delta
+        self.delta1 = delta1
+        self.huber = nn.HuberLoss(delta=delta2, reduction="none")
 
-        self.w1 = 0.4
-        self.w2 = 0.6
+        # Normalize so weights sum to one
+        total = w1 + w2 + w3 + w4
+        self.w1 = w1 / total
+        self.w2 = w2 / total
+        self.w3 = w3 / total
+        self.w4 = w4 / total
 
     def distHuber(self, pred, target):
         dist = torch.linalg.norm(pred - target, dim=-1)
         quadratic = 0.5 * dist**2
-        linear = self.delta * (dist - 0.5 * self.delta)
-        loss = torch.where(dist < self.delta, quadratic, linear)
+        linear = self.delta1 * (dist - 0.5 * self.delta1)
+        loss = torch.where(dist < self.delta1, quadratic, linear)
         return loss.mean(), dist.mean()
 
     def boneDirLoss(self, pred, target):
@@ -95,7 +100,7 @@ class Loss:
             length_target = torch.linalg.norm(
                 target[:, child] - target[:, parent], dim=-1
             )
-            loss += (length_target - length_pred) ** 2
+            loss += self.huber(length_target, length_pred)
         return (loss / len(self.bones)).mean()
 
     def angleLoss(self, pred, target):
@@ -112,28 +117,18 @@ class Loss:
             loss += (cos_pred - cos_target) ** 2
         return (loss / len(self.angles)).mean()
 
-    def handPointLoss(self, pred, target):
-        weights = torch.ones(21, device=pred.device)
-        weights[[1, 2, 3, 4]] = 5  # thumb
-        weights[[5, 6, 7, 8]] = 2  # index
-        weights[[9, 10, 11, 12]] = 5  # middle
-        weights[[13, 14, 15, 16]] = 1  # ring
-        weights[[17, 18, 19, 20]] = 1  # pinky
-
-        diff = pred - target
-        error = (diff**2).sum(dim=-1)
-        weighted_error = (error * weights).sum(dim=-1)
-        return (weighted_error / weights.sum()).mean()
-
     def criterion(self, pred, target):
         dist_loss, dist_mean = self.distHuber(pred, target)
-        anatomy_loss = (
-            self.boneDirLoss(pred, target)
-            + self.boneLengthLoss(pred, target)
-            + self.angleLoss(pred, target)
-            + self.handPointLoss(pred, target)
+        bone_dir_loss = self.boneDirLoss(pred, target)
+        bone_length_loss = self.boneLengthLoss(pred, target)
+        angle_loss = self.angleLoss(pred, target)
+
+        loss = (
+            self.w1 * dist_loss
+            + self.w2 * bone_dir_loss
+            + self.w3 * bone_length_loss
+            + self.w4 * angle_loss
         )
-        loss = self.w1 * dist_loss + self.w2 * anatomy_loss
         return loss, dist_mean
 
 
@@ -141,11 +136,6 @@ def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
-
-
-def saveConfigs(cfgs, name):
-    with open((Path(cfgs["model_dir"]) / f"{name}.json"), "w") as f:
-        json.dump(cfgs, f, indent=4)
 
 
 def collateDecoder(batch):
@@ -266,9 +256,12 @@ def train(cfgs: dict, decoder_criterion, trial=None):
     decoder_model = AnatomyModel(
         cfgs["input_size"],
         cfgs["decoder_hidden_size"],
+        cfgs["decoder_hidden1"],
         cfgs["decoder_output_size"],
         cfgs["decoder_dropout"],
+        mano_root=cfgs["mano_root"],
         generator=False,
+        ncomps=cfgs["ncomps"],
     )
 
     decoder_optimizer = optim.AdamW(
@@ -281,17 +274,20 @@ def train(cfgs: dict, decoder_criterion, trial=None):
         decoder_optimizer,
         mode="min",
         min_lr=1e-6,
-        factor=cfgs["scheduler_factor"],
-        patience=cfgs["scheduler_patience"],
+        factor=0.5,
+        patience=5,
         threshold=cfgs["es_thresh"],
     )
 
     generator_model = AnatomyModel(
         cfgs["input_size"],
         cfgs["generator_hidden_size"],
+        cfgs["generator_hidden1"],
         cfgs["generator_output_size"],
         cfgs["generator_dropout"],
+        mano_root=cfgs["mano_root"],
         generator=True,
+        ncomps=cfgs["ncomps"],
     )
 
     generator_optimizer = optim.AdamW(
@@ -304,8 +300,8 @@ def train(cfgs: dict, decoder_criterion, trial=None):
         generator_optimizer,
         mode="min",
         min_lr=1e-6,
-        factor=cfgs["scheduler_factor"],
-        patience=cfgs["scheduler_patience"],
+        factor=0.5,
+        patience=5,
         threshold=cfgs["es_thresh"],
     )
 
@@ -330,36 +326,46 @@ def train(cfgs: dict, decoder_criterion, trial=None):
 
 def objective(trial):
     trial_configs = configs.copy()
+    decoder_hidden1 = trial.suggest_int("decoder_hidden1", 128, 512, step=16)
+    generator_hidden1 = trial.suggest_int("generator_hidden1", 128, 512, step=16)
     generator_hidden_size = trial.suggest_int("generator_hidden_size", 32, 128, step=16)
     decoder_hidden_size = trial.suggest_int("decoder_hidden_size", 32, 128, step=16)
-    generator_dropout = trial.suggest_float("generator_dropout", 0.1, 0.3)
-    decoder_dropout = trial.suggest_float("decoder_dropout", 0.2, 0.4)
-    delta = trial.suggest_float("delta", 0.5, 10, log=True)
-    decoder_lr = trial.suggest_float("decoder_lr", 1e-5, 1e-3, log=True)
-    generator_lr = trial.suggest_float("generator_lr", 1e-5, 1e-3, log=True)
+    generator_dropout = trial.suggest_float("generator_dropout", 0.0, 0.4)
+    decoder_dropout = trial.suggest_float("decoder_dropout", 0.0, 0.6)
+    delta1 = trial.suggest_float("delta1", 1, 10, log=True)
+    delta2 = trial.suggest_float("delta2", 1, 10, log=True)
+    decoder_lr = trial.suggest_float("decoder_lr", 5e-5, 1e-3, log=True)
+    generator_lr = trial.suggest_float("generator_lr", 5e-5, 1e-3, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
-    scheduler_factor = trial.suggest_float("scheduler_factor", 0.2, 0.7)
-    scheduler_patience = trial.suggest_int("scheduler_patience", 5, 10)
-    num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
+    w1 = trial.suggest_float("w1", 0, 1)
+    w2 = trial.suggest_float("w2", 0, 1)
+    w3 = trial.suggest_float("w3", 0, 1)
+    w4 = trial.suggest_float("w4", 0, 1)
+    num_epochs = trial.suggest_int("num_epochs", 30, 100, step=10)
 
-    decoder_criterion = nn.HuberLoss(delta=delta)
     trial_configs.update(
         {
             "decoder_lr": decoder_lr,
             "generator_lr": generator_lr,
+            "decoder_hidden1": decoder_hidden1,
+            "generator_hidden1": generator_hidden1,
             "generator_hidden_size": generator_hidden_size,
             "decoder_hidden_size": decoder_hidden_size,
             "generator_dropout": generator_dropout,
             "decoder_dropout": decoder_dropout,
-            "delta": delta,
+            "w1": w1,
+            "w2": w2,
+            "w3": w3,
+            "w4": w4,
+            "delta1": delta1,
+            "delta2": delta2,
             "weight_decay": weight_decay,
             "batch_size": batch_size,
-            "scheduler_factor": scheduler_factor,
-            "scheduler_patience": scheduler_patience,
             "num_epochs": num_epochs,
         }
     )
+    decoder_criterion = Loss(delta1, delta2, w1, w2, w3, w4).criterion
 
     train_loss, val_loss, train_dist, val_dist = train(
         trial_configs, decoder_criterion, trial
@@ -378,9 +384,9 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
         )
-        study.optimize(objective, n_trials=100)
+        study.optimize(objective, n_trials=70)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
@@ -389,9 +395,23 @@ if __name__ == "__main__":
 
         configs.update(study.best_params)
         saveConfigs(configs, "optunaconfigs")
-        final_decoder_criterion = Loss(delta=configs["delta"]).criterion
+        final_decoder_criterion = Loss(
+            configs["delta1"],
+            configs["delta2"],
+            configs["w1"],
+            configs["w2"],
+            configs["w3"],
+            configs["w4"],
+        ).criterion
         train(configs, final_decoder_criterion)
     else:
-        final_decoder_criterion = Loss(delta=dec_pre_configs["delta"]).criterion
+        final_decoder_criterion = Loss(
+            dec_pre_configs["delta1"],
+            dec_pre_configs["delta2"],
+            dec_pre_configs["w1"],
+            dec_pre_configs["w2"],
+            dec_pre_configs["w3"],
+            dec_pre_configs["w4"],
+        ).criterion
         train(dec_pre_configs, final_decoder_criterion)
         saveConfigs(dec_pre_configs, "decpreconfigs")

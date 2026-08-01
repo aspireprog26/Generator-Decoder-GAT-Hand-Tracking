@@ -1,34 +1,34 @@
 import json
-import sys
 from pathlib import Path
 
 import optuna
 import torch
 from model import AnatomyModel
 from posttrainer import Trainer
-from pretrain import saveConfigs
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
-from keypointdetection import HAND_SKELETON, ANGLE_JOINTS  # type: ignore # noqa: I001
+from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
 
 class Loss:
-    def __init__(self, delta):
+    def __init__(self, delta1, delta2, w1, w2, w3, w4):
         self.bones = HAND_SKELETON
         self.angles = ANGLE_JOINTS
-        self.delta = delta
+        self.delta1 = delta1
+        self.huber = nn.HuberLoss(delta=delta2, reduction="none")
 
-        self.w1 = 0.4
-        self.w2 = 0.6
+        total = w1 + w2 + w3 + w4
+        self.w1 = w1 / total
+        self.w2 = w2 / total
+        self.w3 = w3 / total
+        self.w4 = w4 / total
 
     def distHuber(self, pred, target):
         dist = torch.linalg.norm(pred - target, dim=-1)
         quadratic = 0.5 * dist**2
-        linear = self.delta * (dist - 0.5 * self.delta)
-        loss = torch.where(dist < self.delta, quadratic, linear)
+        linear = self.delta1 * (dist - 0.5 * self.delta1)
+        loss = torch.where(dist < self.delta1, quadratic, linear)
         return loss.mean(), dist.mean()
 
     def boneDirLoss(self, pred, target):
@@ -50,7 +50,7 @@ class Loss:
             length_target = torch.linalg.norm(
                 target[:, child] - target[:, parent], dim=-1
             )
-            loss += (length_target - length_pred) ** 2
+            loss += self.huber(length_target, length_pred)
         return (loss / len(self.bones)).mean()
 
     def angleLoss(self, pred, target):
@@ -67,46 +67,24 @@ class Loss:
             loss += (cos_pred - cos_target) ** 2
         return (loss / len(self.angles)).mean()
 
-    def handPointLoss(self, pred, target):
-        weights = torch.ones(21, device=pred.device)
-        weights[[1, 2, 3, 4]] = 5  # thumb
-        weights[[5, 6, 7, 8]] = 2  # index
-        weights[[9, 10, 11, 12]] = 5  # middle
-        weights[[13, 14, 15, 16]] = 1  # ring
-        weights[[17, 18, 19, 20]] = 1  # pinky
-
-        diff = pred - target
-        error = (diff**2).sum(dim=-1)
-        weighted_error = (error * weights).sum(dim=-1)
-        return (weighted_error / weights.sum()).mean()
-
     def criterion(self, pred, target):
         dist_loss, dist_mean = self.distHuber(pred, target)
-        anatomy_loss = (
-            self.boneDirLoss(pred, target)
-            + self.boneLengthLoss(pred, target)
-            + self.angleLoss(pred, target)
-            + self.handPointLoss(pred, target)
+        bone_dir_loss = self.boneDirLoss(pred, target)
+        bone_length_loss = self.boneLengthLoss(pred, target)
+        angle_loss = self.angleLoss(pred, target)
+
+        loss = (
+            self.w1 * dist_loss
+            + self.w2 * bone_dir_loss
+            + self.w3 * bone_length_loss
+            + self.w4 * angle_loss
         )
-        loss = self.w1 * dist_loss + self.w2 * anatomy_loss
-        return loss, dist_mean, anatomy_loss - self.handPointLoss(pred, target)
+        return loss, dist_mean
 
 
 MODE = "optuna"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
-
-configs_pop = [
-    "generator_lr",
-    "generator_dropout",
-    "generator_hidden_size",
-    "generator_output_size",
-    "generator_model_name",
-    "stb_dir",
-]
-
-for config in configs_pop:
-    dec_post_configs.pop(config)
 
 """
 For fine tuning after trials
@@ -115,6 +93,14 @@ with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r"
 """
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+criterion = Loss(
+    dec_post_configs["delta1"],
+    dec_post_configs["delta2"],
+    dec_post_configs["w1"],
+    dec_post_configs["w2"],
+    dec_post_configs["w3"],
+    dec_post_configs["w4"],
+).criterion
 
 
 def collate(batch):
@@ -157,13 +143,15 @@ def createDataset(batch_size):
 
 def train(cfgs: dict, criterion, trial=None):
     train_loader, val_loader = createDataset(cfgs["batch_size"])
-
     model = AnatomyModel(
         cfgs["input_size"],
         cfgs["decoder_hidden_size"],
+        cfgs["decoder_hidden1"],
         cfgs["decoder_output_size"],
         cfgs["decoder_dropout"],
+        mano_root=cfgs["mano_root"],
         generator=False,
+        ncomps=cfgs["ncomps"],
     ).to(device)
 
     weights = torch.load(
@@ -183,8 +171,8 @@ def train(cfgs: dict, criterion, trial=None):
         optimizer,
         mode="min",
         min_lr=1e-6,
-        factor=cfgs["scheduler_factor"],
-        patience=cfgs["scheduler_patience"],
+        factor=0.5,
+        patience=5,
         threshold=cfgs["es_thresh"],
     )
 
@@ -202,9 +190,7 @@ def objective(trial):
     lr_factor = trial.suggest_float("lr_factor", 0.05, 1)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
-    delta = trial.suggest_float("delta", 0.5, 10, log=True)
 
-    criterion = Loss(delta).criterion
     trial_configs.update(
         {
             "num_epochs": num_epochs,
@@ -212,7 +198,6 @@ def objective(trial):
             "batch_size": batch_size,
             "weight_decay": weight_decay,
             "lr_factor": lr_factor,
-            "delta": delta,
         }
     )
 
@@ -231,7 +216,7 @@ if __name__ == "__main__":
             direction="minimize",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
         )
-        study.optimize(objective, n_trials=50)
+        study.optimize(objective, n_trials=75)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
@@ -240,9 +225,7 @@ if __name__ == "__main__":
 
         dec_post_configs.update(study.best_params)
         saveConfigs(dec_post_configs, "decpostconfigs")
-        final_criterion = Loss(dec_post_configs["delta"]).criterion
-        train(dec_post_configs, final_criterion)
+        train(dec_post_configs, criterion)
     else:
-        final_criterion = Loss(dec_post_configs["delta"]).criterion
-        train(dec_post_configs, final_criterion)
+        train(dec_post_configs, criterion)
         saveConfigs(dec_post_configs, "decpostconfigs")
