@@ -9,10 +9,10 @@ import numpy as np
 import torch
 from model import AnatomyModel
 from posttrain import Loss
-from posttrainer import Trainer
 from pretrainer import Trainer as PreTrainer
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
+from utils import Stats, procrustesAlign
 
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Dataset")
@@ -76,10 +76,10 @@ model = AnatomyModel(
     configs["input_size"],
     configs["decoder_hidden_size"],
     configs["decoder_hidden1"],
-    configs["generator_output_size"],
-    configs["generator_dropout"],
+    configs["decoder_output_size"],
+    configs["decoder_dropout"],
     mano_root=configs["mano_root"],
-    generator=True,
+    generator=False,
     ncomps=configs["ncomps"],
 ).to(device)
 
@@ -103,7 +103,7 @@ test_loader = DataLoader(
     collate_fn=collate,
 )
 
-standardize = Trainer(model, configs, None, None, None, None, None, device).standardize
+standardize = Stats(device).standardize
 feats = PreTrainer(
     configs,
     None,
@@ -148,23 +148,38 @@ def evalModel(sample: Path):
                 edge_index = batch.edge_index.to(device)
                 b = batch.batch.to(device)
 
-                errors = model(features, edge_index, b)
-                errors = errors.view(errors.size(0), 21, 3)
-                scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
-                pred = coords_proj + (scale[:, None, None] * errors)
+                pred_coords = model(features, edge_index, b)
 
-                _, dist, anatomy = criterion(pred, target)
+                pred_scale = torch.linalg.norm(
+                    pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
+                ).clamp_min(1e-8)
+                pred_coords = pred_coords - pred_coords[:, :1]
+                pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
+
+                target_scale = torch.linalg.norm(
+                    target[:, 9] - target[:, 0], dim=-1, keepdim=True
+                ).clamp_min(1e-8)
+                target = target - target[:, :1]
+                target_norm = target / target_scale.unsqueeze(-1)
+
+                loss, dist = criterion(pred_coords_norm, target_norm)
+
+                """
+                pred_coords = model(features, edge_index, b)
+                pred_coords = procrustesAlign(pred_coords, coords_proj)
+                _, dist = criterion(pred_coords_norm, target_norm)
+                """
 
                 """
                 orig_center = coords_proj[:, PALM].mean(dim=1)
-                pred_center = pred[:, PALM].mean(dim=1)
+                pred_center = pred_coords[:, PALM].mean(dim=1)
                 translation = orig_center - pred_center
-                pred += translation.unsqueeze(1)
-                _, dist, _ = criterion(pred, target)
+                pred_coords += translation.unsqueeze(1)
+                _, dist = criterion(pred_coords_norm, target_norm)
                 """
 
                 test_dist += dist.item() * batch.num_graphs
-                test_loss += anatomy.item() * batch.num_graphs
+                test_loss += loss.item() * batch.num_graphs
                 test_samples += batch.num_graphs
 
         test_loss /= test_samples
@@ -217,7 +232,7 @@ def evalModel(sample: Path):
         left_kps = torch.tensor(left_kps).unsqueeze(0).to(device)
         right_kps = torch.tensor(right_kps).unsqueeze(0).to(device)
 
-        feat, coords_proj, scale = feats(points3D, left_kps, right_kps)
+        feat, coords_proj, _ = feats(points3D, left_kps, right_kps)
         feat = feat.reshape(1, 21, 19)
         feat = standardize(feat)
 
@@ -225,12 +240,9 @@ def evalModel(sample: Path):
         batch = torch.zeros(21, dtype=torch.long, device=device)
 
         with torch.inference_mode():
-            errors = model(feat, edge_index, batch)
-            errors = errors.view(1, 21, 3)
-
-            scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=-1)
-            pred = coords_proj + (scale[:, None, None] * errors)
-            points3D_corr = pred.squeeze(0).cpu().numpy()
+            pred_coords = model(feat, edge_index, b)
+            pred_coords = procrustesAlign(pred_coords, coords_proj)
+            points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
         """
         points3D = points3D.squeeze(0).cpu().numpy()
@@ -240,21 +252,18 @@ def evalModel(sample: Path):
         points3D_corr += translation
         """
 
+        # Plot corrected points
+        plot(points3D_corr, orig=False)
+
         # Compute average inference time
         t0 = time.time()
         for _ in range(200):
             with torch.inference_mode():
-                errors = model(feat, edge_index, batch)
-                errors = errors.view(1, 21, 3)
-
-                scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=-1)
-                pred = coords_proj + (scale[:, None, None] * errors)
-                points3D_corr = pred.squeeze(0).cpu().numpy()
+                pred_coords = model(features, edge_index, b)
+                pred_coords = procrustesAlign(pred_coords, coords_proj)
+                points3D_corr = pred_coords.squeeze(0).cpu().numpy()
         t1 = time.time()
         avg_time = (t1 - t0) / 200
-
-        # Plot corrected points
-        plot(points3D_corr, orig=False)
 
     return test_loss, test_dist, avg_time
 

@@ -22,7 +22,7 @@ torch.cuda.manual_seed_all(SEED)
 g = torch.Generator()
 g.manual_seed(SEED)
 
-MODE = "optuna"
+MODE = "train"
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -38,7 +38,6 @@ configs = {
     "decoder_output_size": 22,  # ncomps + 10 + 3 + 3
     "num_workers": 2,
     "num_epochs": 100,
-    "delta": 1,
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
@@ -56,6 +55,7 @@ configs = {
 # For fine tuning after optuna trials are complete, MODE="train"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
     dec_pre_configs = json.load(f)
+dec_pre_configs.update({"num_epochs": 60})
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
 

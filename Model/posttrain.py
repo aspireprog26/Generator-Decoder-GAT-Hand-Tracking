@@ -179,8 +179,8 @@ def train(cfgs: dict, criterion, trial=None):
     trainer = Trainer(
         model, cfgs, train_loader, val_loader, optimizer, scheduler, criterion, device
     )
-    train_anatomy, val_anatomy = trainer.train(trial)
-    return train_anatomy, val_anatomy
+    train_loss, val_loss, train_dist, val_dist = trainer.train(trial)
+    return train_loss, val_loss, train_dist, val_dist
 
 
 def objective(trial):
@@ -201,22 +201,24 @@ def objective(trial):
         }
     )
 
-    train_anatomy, val_anatomy = train(trial_configs, criterion, trial)
+    train_loss, val_loss, train_dist, val_dist = train(trial_configs, criterion, trial)
     print(
         f"\nTrial Number: {trial.number} | "
-        f"Train Loss: {train_anatomy} | "
-        f"Validation Loss: {val_anatomy}"
+        f"Train Loss: {train_loss: .4f} | "
+        f"Train Anatomy: {train_dist: .4f} | "
+        f"Val Loss: {val_loss: .4f} | "
+        f"Val Anatomy: {val_dist:.4f}"
     )
-    return val_anatomy
+    return val_loss
 
 
 if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
         )
-        study.optimize(objective, n_trials=50)
+        study.optimize(objective, n_trials=65)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")

@@ -43,7 +43,6 @@ class Trainer:
         self.decoder_criterion = decoder_criterion
         self.generator_criterion = generator_criterion
         self.num_epochs = configs["num_epochs"]
-        self.huber_delta = configs["delta"]
 
         self.gen_model_save_path = (
             Path(configs["model_dir"]) / configs["generator_model_name"]
@@ -164,87 +163,6 @@ class Trainer:
         std = self.decoder_std if decoder else self.generator_std
         stand_feats = (features - mean) / std
         return stand_feats
-
-    def procrustesAlign(
-        self,
-        X,  # raw 3D keypoint
-        Y,  # MANO predicted 3D keypoints
-        allow_reflection=False,
-        allow_scaling=True,
-        eps=1e-7,
-    ):
-        in_dtype = X.dtype
-
-        # Use float32 for numerical stability
-        X32 = X.float()
-        Y32 = Y.float()
-
-        B, _, D = X32.shape
-
-        # Center point clouds
-        X_mean = X32.mean(dim=1, keepdim=True)
-        Y_mean = Y32.mean(dim=1, keepdim=True)
-
-        X_c = X32 - X_mean
-        Y_c = Y32 - Y_mean
-
-        # Cross covariance
-        M = torch.bmm(X_c.transpose(1, 2), Y_c)
-
-        # Add regularization
-        jitter = 1e-6
-        M = M + jitter * torch.eye(
-            M.shape[-1], device=M.device, dtype=M.dtype
-        ).unsqueeze(0)
-
-        # SVD
-        U, S, Vh = torch.linalg.svd(M)
-
-        # Rotation
-        if allow_reflection:
-            R = torch.bmm(U, Vh)
-            scale_num = S.sum(dim=-1)
-        else:
-            det = torch.linalg.det(torch.bmm(U, Vh))
-
-            sign = torch.where(
-                det < 0,
-                -torch.ones_like(det),
-                torch.ones_like(det),
-            ).detach()
-
-            Dmat = (
-                torch.eye(
-                    D,
-                    device=X.device,
-                    dtype=torch.float32,
-                )
-                .unsqueeze(0)
-                .repeat(B, 1, 1)
-            )
-
-            Dmat[:, -1, -1] = sign
-            R = torch.bmm(
-                torch.bmm(U, Dmat),
-                Vh,
-            )
-            scale_num = S.sum(dim=-1) - (sign < 0).to(S.dtype) * 2.0 * S[:, -1]
-
-        # Scale
-        if allow_scaling:
-            var_X = (X_c**2).sum(dim=(1, 2))
-            var_X = torch.clamp(var_X, min=eps)
-            s = (scale_num / var_X)[:, None, None]
-        else:
-            s = torch.ones(
-                (B, 1, 1),
-                device=X.device,
-                dtype=torch.float32,
-            )
-
-        # Apply alignment
-        X_aligned = s * torch.bmm(X_c, R) + Y_mean
-        return X_aligned.to(in_dtype)
 
     def train(self, trial=None, generator_warmup_epochs=10):
         # Do warmup training of the generator before fully starting decoder training
