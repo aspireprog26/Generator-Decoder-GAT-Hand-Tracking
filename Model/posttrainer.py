@@ -20,7 +20,7 @@ class Trainer:
         criterion: nn,
         device: device,
     ):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.model = model
 
         self.train_loader = train_loader
@@ -35,33 +35,31 @@ class Trainer:
         self.min_delta = configs["es_thresh"]
         # patience = configs["es_patience"]
 
-        decoder_stats = torch.load(
+        stats = torch.load(
             Path(configs["stereo_data_dir"]) / "Training" / "Decoder" / "stats.pt",
             weights_only=False,
         )
-        self.decoder_mean = decoder_stats[0].to(self.device, dtype=torch.float32)
-        self.decoder_std = decoder_stats[1].to(self.device, dtype=torch.float32)
+        self.mean = stats[0].to(self.device, dtype=torch.float32)
+        self.std = stats[1].to(self.device, dtype=torch.float32)
 
-        self.model_save_path = (
-            Path(configs["model_dir"]) / configs["decoder_model_name"]
-        )
+        self.model_save_path = Path(configs["model_dir"]) / f"{configs['model_name']}"
         self.best_loss = np.inf
         # self.early_stopper = es.EarlyStopping(patience, self.min_delta, model_save_path)
 
     def standardize(self, features):
-        stand_feats = (features - self.decoder_mean) / self.decoder_std
+        stand_feats = (features - self.mean) / self.std
         return stand_feats
 
     def train(self, trial):
         for epoch in range(self.num_epochs):
             self.model.train()
-            train_loss = 0
             train_dist = 0
+            train_loss = 0
+            train_samples = 0
 
-            for batch, target, coords_proj in self.train_loader:
+            for batch, target, _ in self.train_loader:
                 batch = batch.to(self.device)
                 target = target.to(self.device)
-                coords_proj = coords_proj.to(self.device)
 
                 features = batch.x.to(self.device, dtype=torch.float32)
                 features = features.reshape(batch.num_graphs, 21, 19)
@@ -70,29 +68,42 @@ class Trainer:
                 b = batch.batch.to(self.device)
 
                 self.optimizer.zero_grad()
-                errors = self.model(features, edge_index, b)
-                errors = errors.view(errors.size(0), 21, 3)
-                scale = torch.linalg.norm(coords_proj[:, 9] - coords_proj[:, 0], dim=1)
-                pred = coords_proj + (scale[:, None, None] * errors)
-                loss, dist = self.criterion(pred, target)
+                pred_coords = self.model(features, edge_index, b)
+
+                pred_scale = torch.linalg.norm(
+                    pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
+                ).clamp_min(1e-8)
+                pred_coords = pred_coords - pred_coords[:, :1]
+                pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
+
+                target_scale = torch.linalg.norm(
+                    target[:, 9] - target[:, 0], dim=-1, keepdim=True
+                ).clamp_min(1e-8)
+                target = target - target[:, :1]
+                target_norm = target / target_scale.unsqueeze(-1)
+
+                loss, dist = self.criterion(pred_coords_norm, target_norm)
 
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
-                train_loss += loss.item()
-                train_dist += dist.item()
 
-            train_loss /= len(self.train_loader)
-            train_dist /= len(self.train_loader)
+                train_dist += dist.item() * batch.num_graphs
+                train_loss += loss.item() * batch.num_graphs
+                train_samples += batch.num_graphs
+
+            train_dist /= train_samples
+            train_loss /= train_samples
 
             self.model.eval()
-            val_loss = 0
             val_dist = 0
+            val_loss = 0
+            val_samples = 0
 
             with torch.inference_mode():
-                for batch, target, coords_proj in self.val_loader:
+                for batch, target, _ in self.val_loader:
                     batch = batch.to(self.device)
                     target = target.to(self.device)
-                    coords_proj = coords_proj.to(self.device)
 
                     features = batch.x.to(self.device, dtype=torch.float32)
                     features = features.reshape(batch.num_graphs, 21, 19)
@@ -100,30 +111,41 @@ class Trainer:
                     edge_index = batch.edge_index.to(self.device)
                     b = batch.batch.to(self.device)
 
-                    errors = self.model(features, edge_index, b)
-                    errors = errors.view(errors.size(0), 21, 3)
-                    scale = torch.linalg.norm(
-                        coords_proj[:, 9] - coords_proj[:, 0], dim=1
-                    )
-                    pred = coords_proj + (scale[:, None, None] * errors)
+                    pred_coords = self.model(features, edge_index, b)
 
-                    loss, dist = self.criterion(pred, target)
-                    val_loss += loss.item()
-                    val_dist += dist.item()
+                    pred_scale = torch.linalg.norm(
+                        pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
+                    ).clamp_min(1e-8)
+                    pred_coords = pred_coords - pred_coords[:, :1]
+                    pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
 
-            val_loss /= len(self.val_loader)
-            val_dist /= len(self.val_loader)
+                    target_scale = torch.linalg.norm(
+                        target[:, 9] - target[:, 0], dim=-1, keepdim=True
+                    ).clamp_min(1e-8)
+                    target = target - target[:, :1]
+                    target_norm = target / target_scale.unsqueeze(-1)
+
+                    loss, dist = self.criterion(pred_coords_norm, target_norm)
+
+                    val_dist += dist.item() * batch.num_graphs
+                    val_loss += loss.item() * batch.num_graphs
+                    val_samples += batch.num_graphs
+
+            val_dist /= val_samples
+            val_loss /= val_samples
 
             if self.scheduler is not None:
-                self.scheduler.step(val_dist)
-            current_lr = self.optimizer.param_groups[0]["lr"]
+                self.scheduler.step(val_loss)
+
+            lr = self.optimizer.param_groups[0]["lr"]
+
             print(
                 f"Epoch: {epoch + 1} | "
-                f"Train Loss: {train_loss} | "
-                f"Train Dist: {train_dist} | "
-                f"Val Loss: {val_loss} | "
-                f"Val Dist: {val_dist} | "
-                f"LR: {current_lr}"
+                f"T-AL: {train_loss: .6f} | "
+                f"T-D: {train_dist: .6f} | "
+                f"V-AL: {val_loss: .6f} | "
+                f"V-D: {val_dist: .6f} | "
+                f"LR: {lr: .6f}"
             )
 
             if val_loss < self.best_loss - self.min_delta:
@@ -141,4 +163,10 @@ class Trainer:
                 print(f"Early Stopping at epoch {epoch + 1} / {self.num_epochs}")
                 break
             """
-        return train_dist, val_dist
+
+        return (
+            train_loss,
+            val_loss,
+            train_dist,
+            val_dist,
+        )

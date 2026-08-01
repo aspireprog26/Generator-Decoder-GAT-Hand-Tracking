@@ -43,7 +43,6 @@ class Trainer:
         self.decoder_criterion = decoder_criterion
         self.generator_criterion = generator_criterion
         self.num_epochs = configs["num_epochs"]
-        self.huber_delta = configs["delta"]
 
         self.gen_model_save_path = (
             Path(configs["model_dir"]) / configs["generator_model_name"]
@@ -165,13 +164,67 @@ class Trainer:
         stand_feats = (features - mean) / std
         return stand_feats
 
-    def train(self, trial=None):
+    def train(self, trial=None, generator_warmup_epochs=10):
+        # Do warmup training of the generator before fully starting decoder training
+        for epoch in range(generator_warmup_epochs):
+            self.generator_model.train()
+            generator_train_loss = 0
+            gen_samples = 0
+
+            for gen_batch, gen_targets, gen_raw in self.generator_train_loader:
+                gen_batch = gen_batch.to(self.device)
+                gen_targets = gen_targets.to(self.device)
+                gen_raw = gen_raw.to(self.device)
+
+                generator_features = gen_batch.x.to(self.device, dtype=torch.float32)
+                generator_edge_index = gen_batch.edge_index.to(self.device)
+                generator_b = gen_batch.batch.to(self.device)
+
+                self.generator_optimizer.zero_grad()
+
+                gen_scale = torch.linalg.norm(
+                    gen_targets[:, 9] - gen_targets[:, 0], dim=1
+                )
+                true_errors = (gen_targets - gen_raw) / gen_scale[:, None, None]
+
+                generator_features = self.standardize(
+                    generator_features.reshape(gen_batch.num_graphs, 21, 19),
+                    decoder=False,
+                )
+                mean_mat, scale = self.generator_model(
+                    generator_features, generator_edge_index, generator_b
+                )
+                mean_mat = mean_mat.reshape(mean_mat.size(0), 21, 3)
+
+                generator_loss = self.generator_criterion(
+                    true_errors,
+                    mean_mat,
+                    scale,
+                    self.cov_row,
+                    self.col_inv,
+                    self.logdet_col,
+                    self.device,
+                )
+                generator_loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.generator_model.parameters(), max_norm=1.0
+                )
+                self.generator_optimizer.step()
+
+                generator_train_loss += generator_loss.item() * gen_batch.num_graphs
+                gen_samples += gen_batch.num_graphs
+
+            print(
+                f"[Warmup] Epoch {epoch + 1} / {generator_warmup_epochs} | GenTL: {generator_train_loss / gen_samples:.5f}"
+            )
+
         for epoch in range(self.num_epochs):
             generator_train_iter = cycle(self.generator_train_loader)
 
             self.generator_model.train()
             self.decoder_model.train()
             decoder_train_loss = 0
+            decoder_train_dist = 0
             generator_train_loss = 0
             dec_samples = 0
             gen_samples = 0
@@ -252,36 +305,50 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                normalized_features, coords_proj, scale = self.features(
+                normalized_features, _, _ = self.features(
                     decoder_coords, left_kps, right_kps, noise
                 )  # Distorted 3D normalized features with noise
                 normalized_features = self.standardize(normalized_features)
 
-                errors = self.decoder_model(
+                pred_coords = self.decoder_model(
                     normalized_features, decoder_edge_index, decoder_b
                 )
 
-                errors = errors.view(errors.size(0), 21, 3)
-                pred_coords = coords_proj + (scale[:, None, None] * errors)
-                decoder_loss = self.decoder_criterion(pred_coords, decoder_coords)
+                pred_scale = torch.linalg.norm(
+                    pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
+                ).clamp_min(1e-8)
+                pred_coords = pred_coords - pred_coords[:, :1]
+                pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
+
+                target_scale = torch.linalg.norm(
+                    decoder_coords[:, 9] - decoder_coords[:, 0], dim=-1, keepdim=True
+                ).clamp_min(1e-8)
+                decoder_coords = decoder_coords - decoder_coords[:, :1]
+                decoder_coords_norm = decoder_coords / target_scale.unsqueeze(-1)
+
+                decoder_loss, dist = self.decoder_criterion(
+                    pred_coords_norm, decoder_coords_norm
+                )
 
                 decoder_loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.decoder_model.parameters(), max_norm=1.0
+                )
                 self.decoder_optimizer.step()
 
-                # Compute the euclidean distance loss per keypoints sqrt(dx^2 + dy^2 + dz^2) then average across all the keypoints
-                dist_loss = torch.linalg.norm(
-                    pred_coords - decoder_coords, dim=-1
-                ).mean()
-                decoder_train_loss += dist_loss.item() * decoder_batch.num_graphs
+                decoder_train_loss += decoder_loss.item() * decoder_batch.num_graphs
+                decoder_train_dist += dist.item() * decoder_batch.num_graphs
                 dec_samples += decoder_batch.num_graphs
 
             decoder_train_loss /= dec_samples
+            decoder_train_dist /= dec_samples
             generator_train_loss /= gen_samples
 
             self.generator_model.eval()
             self.decoder_model.eval()
 
             decoder_val_loss = 0
+            decoder_val_dist = 0
             generator_val_loss = 0
             dec_samples = 0
             gen_samples = 0
@@ -315,23 +382,39 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                    normalized_features, coords_proj, scale = self.features(
+                    normalized_features, _, _ = self.features(
                         decoder_coords, left_kps, right_kps, noise
                     )
                     normalized_features = self.standardize(normalized_features)
 
-                    errors = self.decoder_model(
+                    pred_coords = self.decoder_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
-                    errors = errors.view(errors.size(0), 21, 3)
-                    pred_coords = coords_proj + (scale[:, None, None] * errors)
 
-                    decoder_loss = torch.linalg.norm(
-                        pred_coords - decoder_coords, dim=-1
-                    ).mean()
+                    pred_scale = torch.linalg.norm(
+                        pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
+                    ).clamp_min(1e-8)
+                    pred_coords = pred_coords - pred_coords[:, :1]
+                    pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
+
+                    target_scale = torch.linalg.norm(
+                        decoder_coords[:, 9] - decoder_coords[:, 0],
+                        dim=-1,
+                        keepdim=True,
+                    ).clamp_min(1e-8)
+                    decoder_coords = decoder_coords - decoder_coords[:, :1]
+                    decoder_coords_norm = decoder_coords / target_scale.unsqueeze(-1)
+
+                    decoder_loss, dist = self.decoder_criterion(
+                        pred_coords_norm, decoder_coords_norm
+                    )
+
                     decoder_val_loss += decoder_loss.item() * decoder_batch.num_graphs
+                    decoder_val_dist += dist.item() * decoder_batch.num_graphs
                     dec_samples += decoder_batch.num_graphs
+
             decoder_val_loss /= dec_samples
+            decoder_val_dist /= dec_samples
 
             # Generator Validation
             with torch.inference_mode():
@@ -384,12 +467,14 @@ class Trainer:
             current_gen_lr = self.generator_optimizer.param_groups[0]["lr"]
             print(
                 f"Epoch: {epoch + 1} | "
-                f"DecTL: {decoder_train_loss} | "
-                f"GenTL: {generator_train_loss} | "
-                f"DecVL: {decoder_val_loss} | "
-                f"GenVL: {generator_val_loss} | "
-                f"DecLR: {current_dec_lr: .6f} | "
-                f"GenLR: {current_gen_lr: .6f}"
+                f"DecTL: {decoder_train_loss: .5f} | "
+                f"DecTDL: {decoder_train_dist: .5f} | "
+                f"GenTL: {generator_train_loss: .5f} | "
+                f"DecVL: {decoder_val_loss: .5f} | "
+                f"DecVDL: {decoder_val_dist: .5f} | "
+                f"GenVL: {generator_val_loss: .5f} | "
+                f"DecLR: {current_dec_lr: .5f} | "
+                f"GenLR: {current_gen_lr: .5f}"
             )
 
             if trial is not None:
@@ -402,4 +487,9 @@ class Trainer:
                 torch.save(self.decoder_model.state_dict(), self.dec_model_save_path)
                 torch.save(self.generator_model.state_dict(), self.gen_model_save_path)
 
-        return decoder_train_loss, decoder_val_loss
+        return (
+            decoder_train_loss,
+            decoder_val_loss,
+            decoder_train_dist,
+            decoder_val_dist,
+        )

@@ -1,6 +1,5 @@
-import math
-
 import torch
+from manopth.manolayer import ManoLayer
 from torch import nn
 from torch_geometric.nn import GATConv
 
@@ -33,67 +32,75 @@ class GraphAttentionNet(nn.Module):
 
 
 class Regressor(nn.Module):
-    def __init__(self, input_size, output_size, dropout, generator):
+    def __init__(self, input_size, hidden1, output_size, dropout, generator):
         super().__init__()
-        hidden_size = int((2 ** math.floor(math.log2(input_size))) / 2)
-        hidden2 = hidden_size // 2 if generator else hidden_size // 4
 
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.layer_norm1 = nn.LayerNorm(hidden_size)
+        self.generator = generator
+
+        self.fc1 = nn.Linear(input_size, hidden1)
+        self.layer_norm1 = nn.LayerNorm(hidden1)
         self.dropout1 = nn.Dropout(p=dropout)
 
-        self.fc2 = nn.Linear(hidden_size, hidden2)
-        self.layer_norm2 = nn.LayerNorm(hidden2)
+        self.fc2 = nn.Linear(hidden1, hidden1 // 2)
+        self.layer_norm2 = nn.LayerNorm(hidden1 // 2)
         self.dropout2 = nn.Dropout(p=dropout)
 
-        self.out = nn.Linear(hidden2, output_size)
+        self.out = nn.Linear(hidden1 // 2, output_size)
         self.gelu = nn.GELU()
 
     def forward(self, x):
-        x = self.layer_norm1(self.gelu(self.fc1(x)))
-        x = self.dropout1(x)
+        if self.generator:
+            x = self.layer_norm1(self.gelu(self.fc1(x)))
+            x = self.dropout1(x)
 
-        x = self.layer_norm2(self.gelu(self.fc2(x)))
-        x = self.dropout2(x)
+            x = self.layer_norm2(self.gelu(self.fc2(x)))
+            x = self.dropout2(x)
 
-        out = self.out(x)
-        return out
-
-
-class RegressorPost(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size, dropout):
-        super().__init__()
-
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.layer_norm1 = nn.LayerNorm(hidden_size)
-        self.dropout1 = nn.Dropout(p=dropout)
-
-        self.fc2 = nn.Linear(hidden_size, hidden_size // 2)
-        self.layer_norm2 = nn.LayerNorm(hidden_size // 2)
-        self.dropout2 = nn.Dropout(p=dropout)
-
-        self.out = nn.Linear(hidden_size // 2, output_size)
-        self.gelu = nn.GELU()
-
-    def forward(self, x):
-        x = self.layer_norm1(self.gelu(self.fc1(x)))
-        x = self.dropout1(x)
-
-        x = self.layer_norm2(self.gelu(self.fc2(x)))
-        x = self.dropout2(x)
-
-        out = self.out(x)
-        return out
+            out = self.out(x)
+            return out
+        else:
+            x = self.layer_norm1(self.gelu(self.fc1(x)))
+            x = self.dropout1(x)
+            return x
 
 
 class AnatomyModel(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size, dropout, generator: bool):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        hidden1,
+        output_size,
+        dropout,
+        mano_root,
+        generator: bool,
+        ncomps=6,
+    ):
         super().__init__()
 
         self.gat = GraphAttentionNet(input_size, hidden_size, dropout)
-        self.regressor = Regressor(21 * hidden_size, output_size, dropout, generator)
+        self.regressor = Regressor(
+            21 * hidden_size, hidden1, output_size, dropout, generator
+        )
         self.softplus = nn.Softplus()
         self.generator = generator
+
+        if not self.generator:
+            self.right_mano_layer = ManoLayer(
+                mano_root=mano_root,
+                use_pca=True,
+                ncomps=ncomps,
+                side="right",
+                flat_hand_mean=False,
+            )
+
+            self.ncomps = ncomps
+            mano_param_dim = (
+                16 + ncomps
+            )  # (Global Rotation = 3, Translation = 3, Shape = 10, Pose PCA = 6)
+
+            self.mano_fc = nn.Linear(hidden1, hidden1 // 2)
+            self.mano_out = nn.Linear(hidden1 // 2, mano_param_dim)
 
         if self.generator:
             with torch.no_grad():
@@ -111,4 +118,18 @@ class AnatomyModel(nn.Module):
 
             return mean_mat, scale
         else:
-            return out
+            params = self.mano_fc(out)
+            params = self.mano_out(params)
+
+            global_rot = params[:, :3]
+            pose_pca = params[:, 3 : 3 + self.ncomps]
+            shape = params[:, 3 + self.ncomps : 3 + self.ncomps + 10]
+            trans = params[:, 3 + self.ncomps + 10 :]
+
+            pose = torch.cat([global_rot, pose_pca], dim=1)  # (B, 3+ncomps)
+
+            _, joints = self.right_mano_layer(pose, shape)
+            joints = joints + trans.unsqueeze(
+                1
+            )  # Apply global translation to keypoints
+            return joints
