@@ -87,9 +87,8 @@ with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r")
     dec_post_configs = json.load(f)
 
 """
-For fine tuning after trials
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
-    dec_post_configs = json.load(f)
+For post-optuna fine-tuning
+dec_post_configs.update({"num_epochs": 100})
 """
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

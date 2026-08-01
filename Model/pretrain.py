@@ -55,7 +55,7 @@ configs = {
 # For fine tuning after optuna trials are complete, MODE="train"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
     dec_pre_configs = json.load(f)
-dec_pre_configs.update({"num_epochs": 60})
+dec_pre_configs.update({"num_epochs": 30})
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
 
