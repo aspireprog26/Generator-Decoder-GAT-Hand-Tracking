@@ -54,26 +54,26 @@ class Trainer:
 
     def procrustesAlign(
         self,
-        X,
-        Y,
+        X,  # raw 3D keypoint
+        Y,  # MANO predicted 3D keypoints
         allow_reflection=False,
         allow_scaling=True,
         eps=1e-7,
     ):
         in_dtype = X.dtype
 
-        # Use float64 for numerical stability
-        X64 = X.double()
-        Y64 = Y.double()
+        # Use float32 for numerical stability
+        X32 = X.float()
+        Y32 = Y.float()
 
-        B, N, D = X64.shape
+        B, _, D = X32.shape
 
         # Center point clouds
-        X_mean = X64.mean(dim=1, keepdim=True)
-        Y_mean = Y64.mean(dim=1, keepdim=True)
+        X_mean = X32.mean(dim=1, keepdim=True)
+        Y_mean = Y32.mean(dim=1, keepdim=True)
 
-        X_c = X64 - X_mean
-        Y_c = Y64 - Y_mean
+        X_c = X32 - X_mean
+        Y_c = Y32 - Y_mean
 
         # Cross covariance
         M = torch.bmm(X_c.transpose(1, 2), Y_c)
@@ -98,7 +98,7 @@ class Trainer:
                 torch.eye(
                     D,
                     device=X.device,
-                    dtype=torch.float64,
+                    dtype=torch.float32,
                 )
                 .unsqueeze(0)
                 .repeat(B, 1, 1)
@@ -120,7 +120,7 @@ class Trainer:
             s = torch.ones(
                 (B, 1, 1),
                 device=X.device,
-                dtype=torch.float64,
+                dtype=torch.float32,
             )
 
         # Apply alignment
