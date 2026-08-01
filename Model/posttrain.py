@@ -214,9 +214,9 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
         )
-        study.optimize(objective, n_trials=75)
+        study.optimize(objective, n_trials=50)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")

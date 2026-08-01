@@ -342,7 +342,7 @@ def objective(trial):
     w2 = trial.suggest_float("w2", 0, 1)
     w3 = trial.suggest_float("w3", 0, 1)
     w4 = trial.suggest_float("w4", 0, 1)
-    num_epochs = trial.suggest_int("num_epochs", 30, 100, step=10)
+    num_epochs = trial.suggest_int("num_epochs", 30, 80, step=10)
 
     trial_configs.update(
         {
@@ -386,7 +386,7 @@ if __name__ == "__main__":
             direction="minimize",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
         )
-        study.optimize(objective, n_trials=70)
+        study.optimize(objective, n_trials=65)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")

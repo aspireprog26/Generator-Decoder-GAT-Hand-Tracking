@@ -191,6 +191,12 @@ class Trainer:
         # Cross covariance
         M = torch.bmm(X_c.transpose(1, 2), Y_c)
 
+        # Add regularization
+        jitter = 1e-6
+        M = M + jitter * torch.eye(
+            M.shape[-1], device=M.device, dtype=M.dtype
+        ).unsqueeze(0)
+
         # SVD
         U, S, Vh = torch.linalg.svd(M)
 
@@ -381,7 +387,7 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                normalized_features, coords_proj, _ = self.features(
+                normalized_features, _, _ = self.features(
                     decoder_coords, left_kps, right_kps, noise
                 )  # Distorted 3D normalized features with noise
                 normalized_features = self.standardize(normalized_features)
@@ -389,10 +395,27 @@ class Trainer:
                 pred_coords = self.decoder_model(
                     normalized_features, decoder_edge_index, decoder_b
                 )
-                pred_coords = self.procrustesAlign(pred_coords, coords_proj)
-                decoder_loss, dist = self.decoder_criterion(pred_coords, decoder_coords)
+
+                pred_scale = torch.linalg.norm(
+                    pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
+                ).clamp_min(1e-8)
+                pred_coords = pred_coords - pred_coords[:, :1]
+                pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
+
+                target_scale = torch.linalg.norm(
+                    decoder_coords[:, 9] - decoder_coords[:, 0], dim=-1, keepdim=True
+                ).clamp_min(1e-8)
+                decoder_coords = decoder_coords - decoder_coords[:, :1]
+                decoder_coords_norm = decoder_coords / target_scale.unsqueeze(-1)
+
+                decoder_loss, dist = self.decoder_criterion(
+                    pred_coords_norm, decoder_coords_norm
+                )
 
                 decoder_loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    self.decoder_model.parameters(), max_norm=1.0
+                )
                 self.decoder_optimizer.step()
 
                 decoder_train_loss += decoder_loss.item() * decoder_batch.num_graphs
@@ -441,7 +464,7 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                    normalized_features, coords_proj, _ = self.features(
+                    normalized_features, _, _ = self.features(
                         decoder_coords, left_kps, right_kps, noise
                     )
                     normalized_features = self.standardize(normalized_features)
@@ -449,9 +472,23 @@ class Trainer:
                     pred_coords = self.decoder_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
-                    pred_coords = self.procrustesAlign(pred_coords, coords_proj)
+
+                    pred_scale = torch.linalg.norm(
+                        pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
+                    ).clamp_min(1e-8)
+                    pred_coords = pred_coords - pred_coords[:, :1]
+                    pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
+
+                    target_scale = torch.linalg.norm(
+                        decoder_coords[:, 9] - decoder_coords[:, 0],
+                        dim=-1,
+                        keepdim=True,
+                    ).clamp_min(1e-8)
+                    decoder_coords = decoder_coords - decoder_coords[:, :1]
+                    decoder_coords_norm = decoder_coords / target_scale.unsqueeze(-1)
+
                     decoder_loss, dist = self.decoder_criterion(
-                        pred_coords, decoder_coords
+                        pred_coords_norm, decoder_coords_norm
                     )
 
                     decoder_val_loss += decoder_loss.item() * decoder_batch.num_graphs
