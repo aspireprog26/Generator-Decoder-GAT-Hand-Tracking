@@ -36,7 +36,7 @@ configs = {
     "ncomps": 6,
     "generator_output_size": 64,
     "decoder_output_size": 19,  # ncomps(6) + 10 + 3 -- translation term removed
-    "num_workers": 2,
+    "num_workers": 4,
     "num_epochs": 100,
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
