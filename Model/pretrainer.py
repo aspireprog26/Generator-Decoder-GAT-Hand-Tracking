@@ -6,7 +6,7 @@ import optuna
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
-from utils import procrustesAlign
+from utils import placeAtReference
 
 
 class Trainer:
@@ -314,7 +314,7 @@ class Trainer:
                 pred_coords = self.decoder_model(
                     normalized_features, decoder_edge_index, decoder_b
                 )
-                pred_coords = procrustesAlign(pred_coords, coords_proj)
+                pred_coords = placeAtReference(pred_coords, coords_proj)
 
                 decoder_loss, dist = self.decoder_criterion(pred_coords, decoder_coords)
 
@@ -378,7 +378,7 @@ class Trainer:
                     pred_coords = self.decoder_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
-                    pred_coords = procrustesAlign(pred_coords, coords_proj)
+                    pred_coords = placeAtReference(pred_coords, coords_proj)
 
                     decoder_loss, dist = self.decoder_criterion(
                         pred_coords, decoder_coords

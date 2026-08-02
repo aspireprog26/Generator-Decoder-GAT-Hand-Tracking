@@ -219,6 +219,9 @@ def evalModel(sample: Path):
         plot(ax1, points3D_orig, orig=True)
         plot(ax2, points3D_corr, orig=False)
 
+        plt.tight_layout()
+        plt.show()
+
         t0 = time.time()
         for _ in range(200):
             with torch.inference_mode():
