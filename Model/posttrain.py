@@ -127,6 +127,8 @@ def createDataset(batch_size):
     train_loader = DataLoader(
         dataset=train_dataset,
         num_workers=dec_post_configs["num_workers"],
+        pin_memory=True,
+        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         drop_last=dec_post_configs["drop_last"],
@@ -135,6 +137,8 @@ def createDataset(batch_size):
     val_loader = DataLoader(
         dataset=val_dataset,
         num_workers=dec_post_configs["num_workers"],
+        pin_memory=True,
+        persistent_workers=True,
         batch_size=batch_size,
         drop_last=dec_post_configs["drop_last"],
         collate_fn=collate,

@@ -36,7 +36,7 @@ configs = {
     "ncomps": 6,
     "generator_output_size": 64,
     "decoder_output_size": 19,  # ncomps(6) + 10 + 3 -- translation term removed
-    "num_workers": 4,
+    "num_workers": 12,
     "num_epochs": 100,
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
@@ -198,6 +198,8 @@ def createDataset(batch_size):
     decoder_train_loader = DataLoader(
         dataset=decoder_train_dataset,
         num_workers=configs["num_workers"],
+        pin_memory=True,
+        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateDecoder,
@@ -209,6 +211,8 @@ def createDataset(batch_size):
     decoder_val_loader = DataLoader(
         dataset=decoder_val_dataset,
         num_workers=configs["num_workers"],
+        pin_memory=True,
+        persistent_workers=True,
         batch_size=batch_size,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
@@ -218,6 +222,8 @@ def createDataset(batch_size):
     generator_train_loader = DataLoader(
         dataset=generator_train_dataset,
         num_workers=configs["num_workers"],
+        pin_memory=True,
+        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateGenerator,
@@ -229,6 +235,8 @@ def createDataset(batch_size):
     generator_val_loader = DataLoader(
         dataset=generator_val_dataset,
         num_workers=configs["num_workers"],
+        pin_memory=True,
+        persistent_workers=True,
         batch_size=batch_size,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
