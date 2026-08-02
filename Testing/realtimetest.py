@@ -18,7 +18,7 @@ import keypointdetection as kp  # type: ignore
 from handedgeindex import hand_edge_index  # type: ignore
 from model import AnatomyModel  # type: ignore
 from pretrainer import Trainer as PreTrainer  # type: ignore
-from utils import procrustesAlign, standardize  # type: ignore
+from utils import placeAtReference, standardize  # type: ignore
 
 CAM = 1
 ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
@@ -102,8 +102,10 @@ class Video:
         plt.ion()
         frame_size = 65
 
-        self.fig1 = plt.figure()
-        ax1 = self.fig1.add_subplot(111, projection="3d")
+        self.fig = plt.figure(figsize=(12, 6))
+
+        # --- Left subplot: raw projected points ---
+        ax1 = self.fig.add_subplot(121, projection="3d")
         ax1.set_xlim(-frame_size, frame_size)
         ax1.set_ylim(-frame_size, frame_size)
         ax1.set_zlim(0, frame_size)
@@ -112,6 +114,7 @@ class Video:
         ax1.set_xlabel("X")
         ax1.set_ylabel("Y")
         ax1.set_zlabel("Z")
+        ax1.set_title("Raw Projected Hand Keypoints")
 
         self.scatter1 = ax1.scatter(
             [], [], [], color=(196 / 255, 12 / 255, 27 / 255), s=15, clip_on=True
@@ -120,11 +123,9 @@ class Video:
         for _ in kp.HAND_SKELETON:
             (line,) = ax1.plot([], [], [], "b-", clip_on=True)
             self.lines1.append(line)
-        plt.figure(self.fig1.number)
-        plt.title("Raw Projected Hand Keypoints")
 
-        self.fig2 = plt.figure()
-        ax2 = self.fig2.add_subplot(111, projection="3d")
+        # --- Right subplot: corrected/predicted points ---
+        ax2 = self.fig.add_subplot(122, projection="3d")
         ax2.set_xlim(-frame_size, frame_size)
         ax2.set_ylim(-frame_size, frame_size)
         ax2.set_zlim(0, frame_size)
@@ -133,6 +134,7 @@ class Video:
         ax2.set_xlabel("X")
         ax2.set_ylabel("Y")
         ax2.set_zlabel("Z")
+        ax2.set_title("Corrected 3D Projected Hand Keypoints")
 
         self.scatter2 = ax2.scatter(
             [], [], [], color=(12 / 255, 196 / 255, 27 / 255), s=15, clip_on=True
@@ -141,12 +143,25 @@ class Video:
         for _ in kp.HAND_SKELETON:
             (line,) = ax2.plot([], [], [], "g-", clip_on=True)
             self.lines2.append(line)
-        plt.figure(self.fig2.number)
-        plt.title("Corrected 3D Projected Hand Keypoints")
+
+        plt.tight_layout()
 
     def ema(self, arr, alpha, prev):
         smoothed = arr * alpha + (1 - alpha) * prev
         return smoothed
+
+    def combineFrames(self, left_frame, right_frame):
+        # Ensure both frames share the same height before stacking
+        h1, w1 = left_frame.shape[:2]
+        h2, w2 = right_frame.shape[:2]
+
+        if h1 != h2:
+            target_h = min(h1, h2)
+            left_frame = cv2.resize(left_frame, (int(w1 * target_h / h1), target_h))
+            right_frame = cv2.resize(right_frame, (int(w2 * target_h / h2), target_h))
+
+        combined = np.hstack((left_frame, right_frame))
+        return combined
 
     def take_frame(self):
         while self.running:
@@ -205,8 +220,8 @@ class Video:
                     right, self.prev_ema_coord_r, self.prev_ema_score_r
                 )
 
-                cv2.imshow("Left Camera", left_frame)
-                cv2.imshow("Right Camera", right_frame)
+                combined_frame = self.combineFrames(left_frame, right_frame)
+                cv2.imshow("Stereo Camera", combined_frame)
 
                 self.plot3D("rtm")
                 if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -250,8 +265,9 @@ class Video:
                 )
 
                 print(self.handedness)
-                cv2.imshow("Left Camera", self.left_frame)
-                cv2.imshow("Right Camera", self.right_frame)
+
+                combined_frame = self.combineFrames(self.left_frame, self.right_frame)
+                cv2.imshow("Stereo Camera", combined_frame)
 
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     self.quit()
@@ -329,9 +345,6 @@ class Video:
                     [self.prev_points3D[start, 2], self.prev_points3D[end, 2]]
                 )
 
-            self.fig1.canvas.draw_idle()
-            self.fig1.canvas.flush_events()
-
             points3D = self.mirror(points3D) if self.handedness == "left" else points3D
 
             feat, coords_proj, _ = self.feats(
@@ -343,7 +356,7 @@ class Video:
 
             with torch.inference_mode():
                 pred_coords = self.model(feat, self.edge_index, self.batch)
-                pred_coords = procrustesAlign(pred_coords, coords_proj)
+                pred_coords = placeAtReference(pred_coords, coords_proj)
                 points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
             points3D_corr = (
@@ -351,14 +364,6 @@ class Video:
                 if self.handedness == "left"
                 else points3D_corr
             )
-
-            """
-            # Recenter optimized points at centroid of original raw projected hand palm keypoint coordinates
-            points3D_center = points3D[self.PALM].mean(axis=0)
-            points3D_corr_center = points3D_corr[self.PALM].mean(axis=0)
-            translation = points3D_center - points3D_corr_center
-            points3D_corr += translation
-            """
 
             # Compute the corrected points ema
             self.prev_points3D = self.computeEma(points3D_corr)
@@ -377,8 +382,9 @@ class Video:
                     [self.prev_points3D[start, 2], self.prev_points3D[end, 2]]
                 )
 
-            self.fig2.canvas.draw_idle()
-            self.fig2.canvas.flush_events()
+            # Single redraw for the shared figure -- updates both subplots together
+            self.fig.canvas.draw_idle()
+            self.fig.canvas.flush_events()
 
     def start(self):
         take_frame_thread = Thread(target=self.take_frame, daemon=True)

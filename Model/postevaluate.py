@@ -36,10 +36,7 @@ def collate(batch):
     return (batch, targets, coords_proj)
 
 
-def plot(points3D, orig=True):
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-
+def plot(ax, points3D, orig=True):
     ax.zaxis.set_inverted(True)
     ax.view_init(elev=220, azim=130, roll=0)
 
@@ -54,6 +51,7 @@ def plot(points3D, orig=True):
         color=(196 / 255, 12 / 255, 27 / 255),
         s=15,
     )
+
     for start, end in HAND_SKELETON:
         ax.plot(
             [points3D[start, 0], points3D[end, 0]],
@@ -61,12 +59,12 @@ def plot(points3D, orig=True):
             [points3D[start, 2], points3D[end, 2]],
             "b-",
         )
-    title = (
+
+    ax.set_title(
         "Raw 3D Projected Stereo Mapped Hand Keypoints"
         if orig
         else "Corrected 3D Projected Stereo Mapped Hand Keypoints"
     )
-    plt.title(title)
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -195,10 +193,9 @@ def evalModel(sample: Path):
 
         points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
         points3D = (points4D[:3] / points4D[3]).T * 100
-        points3D = np.squeeze(points3D)
+        points3D_orig = np.squeeze(points3D)
 
-        plot(points3D)
-        points3D = torch.tensor(points3D).unsqueeze(0).to(device)
+        points3D = torch.tensor(points3D_orig).unsqueeze(0).to(device)
         left_kps = torch.tensor(left_kps).unsqueeze(0).to(device)
         right_kps = torch.tensor(right_kps).unsqueeze(0).to(device)
 
@@ -214,8 +211,13 @@ def evalModel(sample: Path):
             pred_coords = placeAtReference(pred_coords, coords_proj)
             points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
-        plot(points3D_corr, orig=False)
-        plt.show()
+        fig = plt.figure(figsize=(14, 6))
+
+        ax1 = fig.add_subplot(1, 2, 1, projection="3d")
+        ax2 = fig.add_subplot(1, 2, 2, projection="3d")
+
+        plot(ax1, points3D_orig, orig=True)
+        plot(ax2, points3D_corr, orig=False)
 
         t0 = time.time()
         for _ in range(200):
