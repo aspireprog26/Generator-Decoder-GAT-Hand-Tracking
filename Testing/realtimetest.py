@@ -14,11 +14,11 @@ sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Model")
 sys.path.insert(0, r"C:\Users\Test\Documents\Hand-Tracking-2\Dataset")
 
 
-import keypointdetection as kp
-from handedgeindex import hand_edge_index
-from model import AnatomyModel
-from posttrainerreg import Trainer
-from pretrainer import Trainer as PreTrainer
+import keypointdetection as kp  # type: ignore
+from handedgeindex import hand_edge_index  # type: ignore
+from model import AnatomyModel  # type: ignore
+from pretrainer import Trainer as PreTrainer  # type: ignore
+from utils import procrustesAlign, standardize  # type: ignore
 
 CAM = 1
 ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
@@ -47,7 +47,6 @@ class Video:
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.standardize = Trainer().standardize
         self.feats = PreTrainer().features
         self.edge_index = hand_edge_index.to(device)
         self.batch = torch.zeros(21, dtype=torch.long, device=device)
@@ -61,13 +60,16 @@ class Video:
         self.model = AnatomyModel(
             configs["input_size"],
             configs["decoder_hidden_size"],
+            configs["decoder_hidden1"],
             configs["decoder_output_size"],
             configs["decoder_dropout"],
+            mano_root=configs["mano_root"],
             generator=False,
+            ncomps=configs["ncomps"],
         ).to(device)
 
         weights = torch.load(
-            (Path(configs["model_dir"]) / f"{configs['decoder_model_name']}reg"),
+            (Path(configs["model_dir"]) / f"{configs['decoder_model_name']}"),
             weights_only=True,
             map_location=device,
         )
@@ -233,9 +235,20 @@ class Video:
                         self.right_coords, self.alpha, self.prev_ema_coord_r
                     )
 
-                self.left_frame = self.pose_mp.draw_hand(self.prev_ema_coord_l, left)
-                self.right_frame = self.pose_mp.draw_hand(self.prev_ema_coord_r, right)
+                self.left_kps, left_handedness, left_handedness_score = (
+                    self.pose_mp.draw_hand(self.prev_ema_coord_l, left)
+                )
+                self.right_right_kps, right_handedness, right_handedness_score = (
+                    self.pose_mp.draw_hand(self.prev_ema_coord_r, right)
+                )
 
+                self.handedness = (
+                    left_handedness
+                    if left_handedness_score > right_handedness_score
+                    else right_handedness
+                )
+
+                print(self.handedness)
                 cv2.imshow("Left Camera", self.left_frame)
                 cv2.imshow("Right Camera", self.right_frame)
 
@@ -249,6 +262,12 @@ class Video:
         else:
             prev_points3D = self.ema(points3D, self.alpha, self.prev_points3D)
         return prev_points3D
+
+    def mirror(self, coords, axis=0):
+        wrist = coords[:, 0:1, :]
+        centered = coords - wrist
+        centered[..., axis] *= -1
+        return centered + wrist
 
     def plot3D(self, mode):
         while self.running:
@@ -313,28 +332,35 @@ class Video:
                 self.fig1.canvas.draw_idle()
                 self.fig1.canvas.flush_events()
 
-                feat, coords_proj, scale = self.feats(
+                points3D = (
+                    self.mirror(points3D) if self.handedness == "left" else points3D
+                )
+
+                feat, coords_proj, _ = self.feats(
                     torch.tensor(points3D),
                     torch.tensor(pts_left),
                     torch.tensor(pts_right),
                 )
-                feat = self.standardize(feat)
+                feat = standardize(feat)
 
                 with torch.inference_mode():
-                    errors = self.model(feat, self.edge_index, self.batch)
-                    errors = errors.view(1, 21, 3)
-
-                    scale = torch.linalg.norm(
-                        coords_proj[:, 9] - coords_proj[:, 0], dim=-1
-                    )
-                    pred_coords = coords_proj + (scale[:, None, None] * errors)
+                    pred_coords = self.model(feat, self.edge_index, self.batch)
+                    pred_coords = procrustesAlign(pred_coords, coords_proj)
                     points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
+                points3D_corr = (
+                    self.mirror(points3D_corr)
+                    if self.handedness == "left"
+                    else points3D_corr
+                )
+
+                """
                 # Recenter optimized points at centroid of original raw projected hand palm keypoint coordinates
                 points3D_center = points3D[self.PALM].mean(axis=0)
                 points3D_corr_center = points3D_corr[self.PALM].mean(axis=0)
                 translation = points3D_center - points3D_corr_center
                 points3D_corr += translation
+                """
 
                 # Compute the corrected points ema
                 self.prev_points3D = self.computeEma(points3D_corr)

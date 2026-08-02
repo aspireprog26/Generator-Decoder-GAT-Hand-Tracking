@@ -42,7 +42,9 @@ class Trainer:
         self.mean = stats[0].to(self.device, dtype=torch.float32)
         self.std = stats[1].to(self.device, dtype=torch.float32)
 
-        self.model_save_path = Path(configs["model_dir"]) / f"{configs['model_name']}"
+        self.model_save_path = (
+            Path(configs["model_dir"]) / f"{configs['decoder_model_name']}"
+        )
         self.best_loss = np.inf
         # self.early_stopper = es.EarlyStopping(patience, self.min_delta, model_save_path)
 
