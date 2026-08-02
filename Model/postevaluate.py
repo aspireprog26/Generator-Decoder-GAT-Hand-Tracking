@@ -67,7 +67,6 @@ def plot(points3D, orig=True):
         else "Corrected 3D Projected Stereo Mapped Hand Keypoints"
     )
     plt.title(title)
-    plt.show()
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -254,6 +253,9 @@ def evalModel(sample: Path):
 
         # Plot corrected points
         plot(points3D_corr, orig=False)
+
+        # Show both figures at the same time
+        plt.show()
 
         # Compute average inference time
         t0 = time.time()

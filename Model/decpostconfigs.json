@@ -12,7 +12,7 @@
     "generator_output_size": 64,
     "decoder_output_size": 22,
     "num_workers": 2,
-    "num_epochs": 90,
+    "num_epochs": 70,
     "weight_decay": 0.00011073223256578295,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",

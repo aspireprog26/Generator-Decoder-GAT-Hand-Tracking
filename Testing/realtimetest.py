@@ -39,6 +39,7 @@ class Video:
         self.left_coords = None
         self.right_coords = None
         self.prev_points3D = None
+        self.handedness = None
 
         self.alpha = 0.7
         self.PALM = [0, 1, 5, 9, 13, 17]
@@ -235,10 +236,10 @@ class Video:
                         self.right_coords, self.alpha, self.prev_ema_coord_r
                     )
 
-                self.left_kps, left_handedness, left_handedness_score = (
+                self.left_frame, left_handedness, left_handedness_score = (
                     self.pose_mp.draw_hand(self.prev_ema_coord_l, left)
                 )
-                self.right_right_kps, right_handedness, right_handedness_score = (
+                self.right_frame, right_handedness, right_handedness_score = (
                     self.pose_mp.draw_hand(self.prev_ema_coord_r, right)
                 )
 
@@ -270,125 +271,122 @@ class Video:
         return centered + wrist
 
     def plot3D(self, mode):
-        while self.running:
-            pts_left = None
-            pts_right = None
-            if mode == "rtm":
-                pts_left = []
-                pts_right = []
+        pts_left = None
+        pts_right = None
+        if mode == "rtm":
+            pts_left = []
+            pts_right = []
 
-                for i in range(21):
-                    pts_left.append(self.left_coords[i])
-                    pts_right.append(self.right_coords[i])
-            else:
-                if self.left_coords is not None and self.right_coords is not None:
-                    pts_left = self.left_coords
-                    pts_right = self.right_coords
+            for i in range(21):
+                pts_left.append(self.left_coords[i])
+                pts_right.append(self.right_coords[i])
+        else:
+            if self.left_coords is not None and self.right_coords is not None:
+                pts_left = self.left_coords
+                pts_right = self.right_coords
 
-            if pts_left is not None and pts_right is not None:
-                pts_left = np.asarray(pts_left, dtype=np.float32)
-                pts_right = np.asarray(pts_right, dtype=np.float32)
+        if pts_left is not None and pts_right is not None:
+            pts_left = np.asarray(pts_left, dtype=np.float32)
+            pts_right = np.asarray(pts_right, dtype=np.float32)
 
-                pts_left_cv = pts_left[:, np.newaxis, :]
-                pts_right_cv = pts_right[:, np.newaxis, :]
+            pts_left_cv = pts_left[:, np.newaxis, :]
+            pts_right_cv = pts_right[:, np.newaxis, :]
 
-                # Undistort and rectify points
-                pts_left_rect = cv2.undistortPoints(
-                    pts_left_cv, self.K1, self.dist1, R=self.R1, P=self.P1
+            # Undistort and rectify points
+            pts_left_rect = cv2.undistortPoints(
+                pts_left_cv, self.K1, self.dist1, R=self.R1, P=self.P1
+            )
+            pts_right_rect = cv2.undistortPoints(
+                pts_right_cv, self.K2, self.dist2, R=self.R2, P=self.P2
+            )
+
+            # Flatten back to (N, 2)
+            pts_left_rect = pts_left_rect.squeeze(1)
+            pts_right_rect = pts_right_rect.squeeze(1)
+
+            # Triangulate using your corrected coordinates
+            points4D = cv2.triangulatePoints(
+                self.P1, self.P2, pts_left_rect.T, pts_right_rect.T
+            )  # Produces output of size (X, Y, Z, W)
+            points3D = (
+                (points4D[:3] / points4D[3]).T * 100
+            )  # Transpose to get shape (N, 3) instead of (3, N) and multiply by 100 for cm
+            points3D = np.squeeze(points3D)
+
+            # Compute the raw projected points ema
+            self.prev_points3D = self.computeEma(points3D)
+            self.scatter1._offsets3d = (
+                self.prev_points3D[:, 0],
+                self.prev_points3D[:, 1],
+                self.prev_points3D[:, 2],
+            )
+            for line, (start, end) in zip(self.lines1, kp.HAND_SKELETON):
+                line.set_data(
+                    [self.prev_points3D[start, 0], self.prev_points3D[end, 0]],
+                    [self.prev_points3D[start, 1], self.prev_points3D[end, 1]],
                 )
-                pts_right_rect = cv2.undistortPoints(
-                    pts_right_cv, self.K2, self.dist2, R=self.R2, P=self.P2
-                )
-
-                # Flatten back to (N, 2)
-                pts_left_rect = pts_left_rect.squeeze(1)
-                pts_right_rect = pts_right_rect.squeeze(1)
-
-                # Triangulate using your corrected coordinates
-                points4D = cv2.triangulatePoints(
-                    self.P1, self.P2, pts_left_rect.T, pts_right_rect.T
-                )  # Produces output of size (X, Y, Z, W)
-                points3D = (
-                    (points4D[:3] / points4D[3]).T * 100
-                )  # Transpose to get shape (N, 3) instead of (3, N) and multiply by 100 for cm
-                points3D = np.squeeze(points3D)
-
-                # Compute the raw projected points ema
-                self.prev_points3D = self.computeEma(points3D)
-                self.scatter1._offsets3d = (
-                    self.prev_points3D[:, 0],
-                    self.prev_points3D[:, 1],
-                    self.prev_points3D[:, 2],
-                )
-                for line, (start, end) in zip(self.lines1, kp.HAND_SKELETON):
-                    line.set_data(
-                        [self.prev_points3D[start, 0], self.prev_points3D[end, 0]],
-                        [self.prev_points3D[start, 1], self.prev_points3D[end, 1]],
-                    )
-                    line.set_3d_properties(
-                        [self.prev_points3D[start, 2], self.prev_points3D[end, 2]]
-                    )
-
-                self.fig1.canvas.draw_idle()
-                self.fig1.canvas.flush_events()
-
-                points3D = (
-                    self.mirror(points3D) if self.handedness == "left" else points3D
+                line.set_3d_properties(
+                    [self.prev_points3D[start, 2], self.prev_points3D[end, 2]]
                 )
 
-                feat, coords_proj, _ = self.feats(
-                    torch.tensor(points3D),
-                    torch.tensor(pts_left),
-                    torch.tensor(pts_right),
+            self.fig1.canvas.draw_idle()
+            self.fig1.canvas.flush_events()
+
+            points3D = self.mirror(points3D) if self.handedness == "left" else points3D
+
+            feat, coords_proj, _ = self.feats(
+                torch.tensor(points3D),
+                torch.tensor(pts_left),
+                torch.tensor(pts_right),
+            )
+            feat = standardize(feat)
+
+            with torch.inference_mode():
+                pred_coords = self.model(feat, self.edge_index, self.batch)
+                pred_coords = procrustesAlign(pred_coords, coords_proj)
+                points3D_corr = pred_coords.squeeze(0).cpu().numpy()
+
+            points3D_corr = (
+                self.mirror(points3D_corr)
+                if self.handedness == "left"
+                else points3D_corr
+            )
+
+            """
+            # Recenter optimized points at centroid of original raw projected hand palm keypoint coordinates
+            points3D_center = points3D[self.PALM].mean(axis=0)
+            points3D_corr_center = points3D_corr[self.PALM].mean(axis=0)
+            translation = points3D_center - points3D_corr_center
+            points3D_corr += translation
+            """
+
+            # Compute the corrected points ema
+            self.prev_points3D = self.computeEma(points3D_corr)
+
+            self.scatter2._offsets3d = (
+                self.prev_points3D[:, 0],
+                self.prev_points3D[:, 1],
+                self.prev_points3D[:, 2],
+            )
+            for line, (start, end) in zip(self.lines2, kp.HAND_SKELETON):
+                line.set_data(
+                    [self.prev_points3D[start, 0], self.prev_points3D[end, 0]],
+                    [self.prev_points3D[start, 1], self.prev_points3D[end, 1]],
                 )
-                feat = standardize(feat)
-
-                with torch.inference_mode():
-                    pred_coords = self.model(feat, self.edge_index, self.batch)
-                    pred_coords = procrustesAlign(pred_coords, coords_proj)
-                    points3D_corr = pred_coords.squeeze(0).cpu().numpy()
-
-                points3D_corr = (
-                    self.mirror(points3D_corr)
-                    if self.handedness == "left"
-                    else points3D_corr
+                line.set_3d_properties(
+                    [self.prev_points3D[start, 2], self.prev_points3D[end, 2]]
                 )
 
-                """
-                # Recenter optimized points at centroid of original raw projected hand palm keypoint coordinates
-                points3D_center = points3D[self.PALM].mean(axis=0)
-                points3D_corr_center = points3D_corr[self.PALM].mean(axis=0)
-                translation = points3D_center - points3D_corr_center
-                points3D_corr += translation
-                """
-
-                # Compute the corrected points ema
-                self.prev_points3D = self.computeEma(points3D_corr)
-
-                self.scatter2._offsets3d = (
-                    self.prev_points3D[:, 0],
-                    self.prev_points3D[:, 1],
-                    self.prev_points3D[:, 2],
-                )
-                for line, (start, end) in zip(self.lines2, kp.HAND_SKELETON):
-                    line.set_data(
-                        [self.prev_points3D[start, 0], self.prev_points3D[end, 0]],
-                        [self.prev_points3D[start, 1], self.prev_points3D[end, 1]],
-                    )
-                    line.set_3d_properties(
-                        [self.prev_points3D[start, 2], self.prev_points3D[end, 2]]
-                    )
-
-                self.fig2.canvas.draw_idle()
-                self.fig2.canvas.flush_events()
+            self.fig2.canvas.draw_idle()
+            self.fig2.canvas.flush_events()
 
     def start(self):
         take_frame_thread = Thread(target=self.take_frame, daemon=True)
         take_frame_thread.start()
-        mp_thread = Thread(target=self.get_frame_mp)
+        mp_thread = Thread(target=self.get_frame_mp, daemon=True)
         mp_thread.start()
-        self.plot3D("mp")
-        plt.show()
+        while self.running:
+            self.plot3D("mp")
 
     def quit(self):
         self.running = False
