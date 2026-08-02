@@ -6,6 +6,7 @@ import optuna
 import torch
 from torch import device, nn, optim
 from torch.utils.data import DataLoader
+from utils import placeAtReference  # CHANGED: was procrustesAlign
 
 
 class Trainer:
@@ -33,7 +34,6 @@ class Trainer:
 
         self.num_epochs = configs["num_epochs"]
         self.min_delta = configs["es_thresh"]
-        # patience = configs["es_patience"]
 
         stats = torch.load(
             Path(configs["stereo_data_dir"]) / "Training" / "Decoder" / "stats.pt",
@@ -46,7 +46,6 @@ class Trainer:
             Path(configs["model_dir"]) / f"{configs['decoder_model_name']}"
         )
         self.best_loss = np.inf
-        # self.early_stopper = es.EarlyStopping(patience, self.min_delta, model_save_path)
 
     def standardize(self, features):
         stand_feats = (features - self.mean) / self.std
@@ -59,9 +58,10 @@ class Trainer:
             train_loss = 0
             train_samples = 0
 
-            for batch, target, _ in self.train_loader:
+            for batch, target, coords_proj in self.train_loader:
                 batch = batch.to(self.device)
                 target = target.to(self.device)
+                coords_proj = coords_proj.to(self.device)
 
                 features = batch.x.to(self.device, dtype=torch.float32)
                 features = features.reshape(batch.num_graphs, 21, 19)
@@ -71,20 +71,8 @@ class Trainer:
 
                 self.optimizer.zero_grad()
                 pred_coords = self.model(features, edge_index, b)
-
-                pred_scale = torch.linalg.norm(
-                    pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
-                ).clamp_min(1e-8)
-                pred_coords = pred_coords - pred_coords[:, :1]
-                pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
-
-                target_scale = torch.linalg.norm(
-                    target[:, 9] - target[:, 0], dim=-1, keepdim=True
-                ).clamp_min(1e-8)
-                target = target - target[:, :1]
-                target_norm = target / target_scale.unsqueeze(-1)
-
-                loss, dist = self.criterion(pred_coords_norm, target_norm)
+                pred_coords = placeAtReference(pred_coords, coords_proj)
+                loss, dist = self.criterion(pred_coords, target)
 
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
@@ -103,9 +91,10 @@ class Trainer:
             val_samples = 0
 
             with torch.inference_mode():
-                for batch, target, _ in self.val_loader:
+                for batch, target, coords_proj in self.val_loader:
                     batch = batch.to(self.device)
                     target = target.to(self.device)
+                    coords_proj = coords_proj.to(self.device)
 
                     features = batch.x.to(self.device, dtype=torch.float32)
                     features = features.reshape(batch.num_graphs, 21, 19)
@@ -114,20 +103,8 @@ class Trainer:
                     b = batch.batch.to(self.device)
 
                     pred_coords = self.model(features, edge_index, b)
-
-                    pred_scale = torch.linalg.norm(
-                        pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
-                    ).clamp_min(1e-8)
-                    pred_coords = pred_coords - pred_coords[:, :1]
-                    pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
-
-                    target_scale = torch.linalg.norm(
-                        target[:, 9] - target[:, 0], dim=-1, keepdim=True
-                    ).clamp_min(1e-8)
-                    target = target - target[:, :1]
-                    target_norm = target / target_scale.unsqueeze(-1)
-
-                    loss, dist = self.criterion(pred_coords_norm, target_norm)
+                    pred_coords = placeAtReference(pred_coords, coords_proj)
+                    loss, dist = self.criterion(pred_coords, target)
 
                     val_dist += dist.item() * batch.num_graphs
                     val_loss += loss.item() * batch.num_graphs
@@ -158,13 +135,6 @@ class Trainer:
                 trial.report(val_loss, epoch)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
-
-            """
-            self.early_stopper(val_loss, self.model)
-            if self.early_stopper.stopping:
-                print(f"Early Stopping at epoch {epoch + 1} / {self.num_epochs}")
-                break
-            """
 
         return (
             train_loss,

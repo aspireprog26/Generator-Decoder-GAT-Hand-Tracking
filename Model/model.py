@@ -49,18 +49,15 @@ class Regressor(nn.Module):
         self.gelu = nn.GELU()
 
     def forward(self, x):
+        x = self.layer_norm1(self.gelu(self.fc1(x)))
+        x = self.dropout1(x)
+
+        x = self.layer_norm2(self.gelu(self.fc2(x)))
+        x = self.dropout2(x)
+
         if self.generator:
-            x = self.layer_norm1(self.gelu(self.fc1(x)))
-            x = self.dropout1(x)
-
-            x = self.layer_norm2(self.gelu(self.fc2(x)))
-            x = self.dropout2(x)
-
-            out = self.out(x)
-            return out
+            return self.out(x)
         else:
-            x = self.layer_norm1(self.gelu(self.fc1(x)))
-            x = self.dropout1(x)
             return x
 
 
@@ -95,11 +92,9 @@ class AnatomyModel(nn.Module):
             )
 
             self.ncomps = ncomps
-            mano_param_dim = (
-                16 + ncomps
-            )  # (Global Rotation = 3, Translation = 3, Shape = 10, Pose PCA = 6)
-
-            self.mano_fc = nn.Linear(hidden1, hidden1 // 2)
+            # Global Rotation = 3, Pose PCA = ncomps, Shape = 10
+            # no translation term -- position/scale come from coords_proj instead
+            mano_param_dim = 3 + ncomps + 10
             self.mano_out = nn.Linear(hidden1 // 2, mano_param_dim)
 
         if self.generator:
@@ -118,18 +113,13 @@ class AnatomyModel(nn.Module):
 
             return mean_mat, scale
         else:
-            params = self.mano_fc(out)
-            params = self.mano_out(params)
+            params = self.mano_out(out)
 
             global_rot = params[:, :3]
             pose_pca = params[:, 3 : 3 + self.ncomps]
             shape = params[:, 3 + self.ncomps : 3 + self.ncomps + 10]
-            trans = params[:, 3 + self.ncomps + 10 :]
 
             pose = torch.cat([global_rot, pose_pca], dim=1)  # (B, 3+ncomps)
 
             _, joints = self.right_mano_layer(pose, shape)
-            joints = joints + trans.unsqueeze(
-                1
-            )  # Apply global translation to keypoints
             return joints

@@ -82,15 +82,16 @@ class Loss:
         return loss, dist_mean
 
 
-MODE = "train"
-"""
+MODE = "optuna"
+
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
-"""
 
-# For post-optuna fine-tuning
+"""
+For post-optuna fine-tuning
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
+"""
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 criterion = Loss(
@@ -216,9 +217,9 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
         )
-        study.optimize(objective, n_trials=75)
+        study.optimize(objective, n_trials=100)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")

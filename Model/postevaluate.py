@@ -12,7 +12,7 @@ from posttrain import Loss
 from pretrainer import Trainer as PreTrainer
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-from utils import Stats, procrustesAlign
+from utils import Stats, placeAtReference  # CHANGED: was procrustesAlign
 
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Dataset")
@@ -22,7 +22,7 @@ from keypointdetection import HAND_SKELETON, MediaPipe  # type: ignore
 
 PALM = [0, 1, 5, 9, 13, 17]
 
-sample_eval = False
+sample_eval = True
 
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     configs = json.load(f)
@@ -148,34 +148,8 @@ def evalModel(sample: Path):
                 b = batch.batch.to(device)
 
                 pred_coords = model(features, edge_index, b)
-
-                pred_scale = torch.linalg.norm(
-                    pred_coords[:, 9] - pred_coords[:, 0], dim=-1, keepdim=True
-                ).clamp_min(1e-8)
-                pred_coords = pred_coords - pred_coords[:, :1]
-                pred_coords_norm = pred_coords / pred_scale.unsqueeze(-1)
-
-                target_scale = torch.linalg.norm(
-                    target[:, 9] - target[:, 0], dim=-1, keepdim=True
-                ).clamp_min(1e-8)
-                target = target - target[:, :1]
-                target_norm = target / target_scale.unsqueeze(-1)
-
-                loss, dist = criterion(pred_coords_norm, target_norm)
-
-                """
-                pred_coords = model(features, edge_index, b)
-                pred_coords = procrustesAlign(pred_coords, coords_proj)
-                _, dist = criterion(pred_coords_norm, target_norm)
-                """
-
-                """
-                orig_center = coords_proj[:, PALM].mean(dim=1)
-                pred_center = pred_coords[:, PALM].mean(dim=1)
-                translation = orig_center - pred_center
-                pred_coords += translation.unsqueeze(1)
-                _, dist = criterion(pred_coords_norm, target_norm)
-                """
+                pred_coords = placeAtReference(pred_coords, coords_proj)
+                loss, dist = criterion(pred_coords, target)
 
                 test_dist += dist.item() * batch.num_graphs
                 test_loss += loss.item() * batch.num_graphs
@@ -192,8 +166,8 @@ def evalModel(sample: Path):
         left = image[:, :half]
         right = image[:, half:]
 
-        left_kps = pose.get_keypoints(left)
-        right_kps = pose.get_keypoints(right)
+        left_kps, _, _ = pose.get_keypoints(left)
+        right_kps, _, _ = pose.get_keypoints(right)
 
         fs = cv2.FileStorage(
             "/home/miket/Documents/Hand-Tracking-2/Stereo/stereo.yml",
@@ -216,16 +190,13 @@ def evalModel(sample: Path):
         pts_left_rect = cv2.undistortPoints(pts_left, K1, dist1, R=R1, P=P1)
         pts_right_rect = cv2.undistortPoints(pts_right, K2, dist2, R=R2, P=P2)
 
-        # Flatten back to (N, 2)
         pts_left_rect = pts_left_rect.squeeze(1)
         pts_right_rect = pts_right_rect.squeeze(1)
 
-        # Obtain 4D points and scale to 3D
         points4D = cv2.triangulatePoints(P1, P2, pts_left_rect.T, pts_right_rect.T)
         points3D = (points4D[:3] / points4D[3]).T * 100
         points3D = np.squeeze(points3D)
 
-        # Plot original points
         plot(points3D)
         points3D = torch.tensor(points3D).unsqueeze(0).to(device)
         left_kps = torch.tensor(left_kps).unsqueeze(0).to(device)
@@ -239,30 +210,18 @@ def evalModel(sample: Path):
         batch = torch.zeros(21, dtype=torch.long, device=device)
 
         with torch.inference_mode():
-            pred_coords = model(feat, edge_index, b)
-            pred_coords = procrustesAlign(pred_coords, coords_proj)
+            pred_coords = model(feat, edge_index, batch)
+            pred_coords = placeAtReference(pred_coords, coords_proj)
             points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
-        """
-        points3D = points3D.squeeze(0).cpu().numpy()
-        points3D_center = points3D[PALM].mean(axis=0)
-        points3D_corr_center = points3D_corr[PALM].mean(axis=0)
-        translation = points3D_center - points3D_corr_center
-        points3D_corr += translation
-        """
-
-        # Plot corrected points
         plot(points3D_corr, orig=False)
-
-        # Show both figures at the same time
         plt.show()
 
-        # Compute average inference time
         t0 = time.time()
         for _ in range(200):
             with torch.inference_mode():
-                pred_coords = model(features, edge_index, b)
-                pred_coords = procrustesAlign(pred_coords, coords_proj)
+                pred_coords = model(feat, edge_index, batch)
+                pred_coords = placeAtReference(pred_coords, coords_proj)
                 points3D_corr = pred_coords.squeeze(0).cpu().numpy()
         t1 = time.time()
         avg_time = (t1 - t0) / 200
@@ -274,5 +233,5 @@ if not sample_eval:
     test_loss, test_dist, avg_time = evalModel(None)
     print(f"Test Anatomy Loss {test_loss: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
-    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Noisy/3719.jpg")
+    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Clean/0000.jpg")
     print(f"Average Time: {avg_time: .4f}")

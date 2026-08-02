@@ -22,7 +22,7 @@ torch.cuda.manual_seed_all(SEED)
 g = torch.Generator()
 g.manual_seed(SEED)
 
-MODE = "train"
+MODE = "optuna"
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -35,7 +35,7 @@ configs = {
     "decoder_hidden1": 64,
     "ncomps": 6,
     "generator_output_size": 64,
-    "decoder_output_size": 22,  # ncomps + 10 + 3 + 3
+    "decoder_output_size": 19,  # ncomps(6) + 10 + 3 -- translation term removed
     "num_workers": 2,
     "num_epochs": 100,
     "weight_decay": 1e-2,
@@ -55,7 +55,6 @@ configs = {
 # For fine tuning after optuna trials are complete, MODE="train"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
     dec_pre_configs = json.load(f)
-dec_pre_configs.update({"num_epochs": 30})
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
 
@@ -67,7 +66,6 @@ class Loss:
         self.delta1 = delta1
         self.huber = nn.HuberLoss(delta=delta2, reduction="none")
 
-        # Normalize so weights sum to one
         total = w1 + w2 + w3 + w4
         self.w1 = w1 / total
         self.w2 = w2 / total
@@ -334,15 +332,15 @@ def objective(trial):
     decoder_dropout = trial.suggest_float("decoder_dropout", 0.0, 0.6)
     delta1 = trial.suggest_float("delta1", 1, 10, log=True)
     delta2 = trial.suggest_float("delta2", 1, 10, log=True)
-    decoder_lr = trial.suggest_float("decoder_lr", 5e-5, 1e-3, log=True)
-    generator_lr = trial.suggest_float("generator_lr", 5e-5, 1e-3, log=True)
+    decoder_lr = trial.suggest_float("decoder_lr", 1e-5, 1e-3, log=True)
+    generator_lr = trial.suggest_float("generator_lr", 1e-5, 1e-3, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
     w1 = trial.suggest_float("w1", 0, 1)
     w2 = trial.suggest_float("w2", 0, 1)
     w3 = trial.suggest_float("w3", 0, 1)
     w4 = trial.suggest_float("w4", 0, 1)
-    num_epochs = trial.suggest_int("num_epochs", 30, 80, step=10)
+    num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
 
     trial_configs.update(
         {
@@ -384,9 +382,9 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
         )
-        study.optimize(objective, n_trials=65)
+        study.optimize(objective, n_trials=100)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
