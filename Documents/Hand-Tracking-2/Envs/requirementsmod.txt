@@ -1,0 +1,6 @@
+optuna
+torch --index-url https://download.pytorch.org/whl/cu124
+torch_geometric
+chumpy
+git+https://github.com/hassony2/manopth.git
+numpy<1.24
