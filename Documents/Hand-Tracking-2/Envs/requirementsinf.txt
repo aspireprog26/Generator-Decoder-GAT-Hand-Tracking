@@ -1,7 +1,0 @@
-opencv-python
-scipy
-mediapipe==0.10.14
-numpy
-pynput
-torch_geometric
-tqdm
