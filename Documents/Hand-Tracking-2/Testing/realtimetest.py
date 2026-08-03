@@ -18,7 +18,7 @@ import keypointdetection as kp  # type: ignore
 from handedgeindex import hand_edge_index  # type: ignore
 from model import AnatomyModel  # type: ignore
 from pretrainer import Trainer as PreTrainer  # type: ignore
-from utils import placeAtReference, Stats  # type: ignore
+from utils import placeAtReference, Stats, configs  # type: ignore
 
 CAM = 1
 ENGINE = r"C:\Users\Test\Documents\RTMPose\model.engine"
@@ -53,11 +53,6 @@ class Video:
         self.feats = PreTrainer().features
         self.edge_index = hand_edge_index.to(device)
         self.batch = torch.zeros(21, dtype=torch.long, device=device)
-
-        with open(
-            "/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r"
-        ) as f:
-            configs = json.load(f)
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = AnatomyModel(
