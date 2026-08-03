@@ -326,16 +326,28 @@ class MediaPipe:
 
     def get_keypoints(self, frame):
         kps = np.zeros((21, 2), dtype=np.float32)
+        handedness_label = None
+        handedness_score = 0.0
+
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb_frame)
 
         if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
+            for hand_landmarks, hand_info in zip(
+                results.multi_hand_landmarks, results.multi_handedness
+            ):
                 h, w, _ = frame.shape
                 for idx, lm in enumerate(hand_landmarks.landmark):
                     px, py = int(lm.x * w), int(lm.y * h)
                     kps[idx] = [px, py]
-        return kps
+
+                handedness_label = hand_info.classification[0].label
+
+                # If the image is not selfie view / mirrored
+                # handedness_label = "Left" if handedness_label == "Right" else "Right"
+
+                handedness_score = hand_info.classification[0].score
+        return kps, handedness_label, handedness_score
 
     def draw_hand(self, coords, frame):
         frame = frame.copy()
