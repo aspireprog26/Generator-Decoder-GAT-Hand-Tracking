@@ -60,25 +60,3 @@ class Stats:
 def saveConfigs(cfgs, name):
     with open((Path(cfgs["model_dir"]) / f"{name}.json"), "w") as f:
         json.dump(cfgs, f, indent=4)
-
-
-def placeAtReference(mano_joints, coords_proj, eps=1e-8):
-    """
-    mano_joints: (B, 21, 3) canonical, root-relative MANO output (joint 0 ~ origin)
-    coords_proj: (B, 21, 3) noisy stereo reference, in real coordinate space
-
-    Rigidly places mano_joints at coords_proj's wrist position and scale,
-    replacing the need for Procrustes alignment.
-    """
-
-    mano_scale = torch.linalg.norm(
-        mano_joints[:, 9] - mano_joints[:, 0], dim=-1, keepdim=True
-    ).clamp_min(eps)
-    mano_joints_unit = mano_joints / mano_scale.unsqueeze(-1)
-
-    target_scale = torch.linalg.norm(
-        coords_proj[:, 9] - coords_proj[:, 0], dim=-1, keepdim=True
-    ).clamp_min(eps)
-    wrist_pos = coords_proj[:, 0:1, :]
-
-    return mano_joints_unit * target_scale.unsqueeze(-1) + wrist_pos

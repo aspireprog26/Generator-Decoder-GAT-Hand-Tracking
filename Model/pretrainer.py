@@ -150,14 +150,10 @@ class Trainer:
     def features(self, coords, left_kps, right_kps, noise=None, eps=1e-8):
         coords = coords.float()
         scale = torch.linalg.norm(coords[:, 9] - coords[:, 0], dim=-1).clamp_min(eps)
-        coords_proj = (
-            (coords - scale[:, None, None] * noise) if noise is not None else coords
-        )
-        features = self.getFeatures(coords_proj, left_kps, right_kps, eps)
-        scale = torch.linalg.norm(
-            coords_proj[:, 9] - coords_proj[:, 0], dim=-1
-        ).clamp_min(eps)
-        return features, coords_proj, scale
+        _ = (coords - scale[:, None, None] * noise) if noise is not None else coords
+        features = self.getFeatures(_, left_kps, right_kps, eps)
+        scale = torch.linalg.norm(_[:, 9] - _[:, 0], dim=-1).clamp_min(eps)
+        return features, _, scale
 
     def standardize(self, features, decoder: bool = True):
         mean = self.decoder_mean if decoder else self.generator_mean
@@ -306,7 +302,7 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                normalized_features, coords_proj, _ = self.features(
+                normalized_features, _, _ = self.features(
                     decoder_coords, left_kps, right_kps, noise
                 )  # Distorted 3D normalized features with noise
                 normalized_features = self.standardize(normalized_features)
@@ -314,8 +310,6 @@ class Trainer:
                 pred_coords = self.decoder_model(
                     normalized_features, decoder_edge_index, decoder_b
                 )
-                pred_coords = placeAtReference(pred_coords, coords_proj)
-
                 decoder_loss, dist = self.decoder_criterion(pred_coords, decoder_coords)
 
                 decoder_loss.backward()
@@ -370,7 +364,7 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                    normalized_features, coords_proj, _ = self.features(
+                    normalized_features, _, _ = self.features(
                         decoder_coords, left_kps, right_kps, noise
                     )
                     normalized_features = self.standardize(normalized_features)
@@ -378,8 +372,6 @@ class Trainer:
                     pred_coords = self.decoder_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
-                    pred_coords = placeAtReference(pred_coords, coords_proj)
-
                     decoder_loss, dist = self.decoder_criterion(
                         pred_coords, decoder_coords
                     )

@@ -14,15 +14,11 @@ from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
 # Must use for reproducability
 SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
 
 g = torch.Generator()
 g.manual_seed(SEED)
 
-MODE = "train"
+MODE = "optuna"
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -33,16 +29,14 @@ configs = {
     "decoder_hidden_size": 32,
     "generator_hidden1": 128,
     "decoder_hidden1": 64,
-    "ncomps": 6,
     "generator_output_size": 64,
-    "decoder_output_size": 19,  # ncomps(6) + 10 + 3 -- translation term removed
+    "decoder_output_size": 63,
     "num_workers": 12,
     "num_epochs": 100,
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
     "model_dir": "/home/miket/Documents/Hand-Tracking-2/Model",
-    "mano_root": "/home/miket/Documents/mano/models",
     "stb_dir": "/home/miket/Documents/StereoSTBDataset",
     "stereo_data_dir": "/home/miket/Documents/StereoDataset",
     "es_patience": 10,
@@ -50,11 +44,16 @@ configs = {
     "scheduler_factor": 0.5,
     "scheduler_patience": 5,
     "drop_last": False,
+    "w1": 0.5,
+    "w2": (0.5 / 3),
+    "w3": (0.5 / 3),
+    "w4": (0.5 / 3),
 }
 
 # For fine tuning after optuna trials are complete, MODE="train"
 with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
     dec_pre_configs = json.load(f)
+dec_pre_configs.update({"num_epochs": 120})
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
 
@@ -247,6 +246,11 @@ def createDataset(batch_size):
 
 
 def train(cfgs: dict, decoder_criterion, trial=None):
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
+
     (
         decoder_train_loader,
         decoder_val_loader,
@@ -258,11 +262,9 @@ def train(cfgs: dict, decoder_criterion, trial=None):
         cfgs["input_size"],
         cfgs["decoder_hidden_size"],
         cfgs["decoder_hidden1"],
-        cfgs["decoder_output_size"],
+        cfgs["decoder_output"],
         cfgs["decoder_dropout"],
-        mano_root=cfgs["mano_root"],
         generator=False,
-        ncomps=cfgs["ncomps"],
     )
 
     decoder_optimizer = optim.AdamW(
@@ -282,13 +284,11 @@ def train(cfgs: dict, decoder_criterion, trial=None):
 
     generator_model = AnatomyModel(
         cfgs["input_size"],
-        cfgs["generator_hidden_size"],
-        cfgs["generator_hidden1"],
-        cfgs["generator_output_size"],
-        cfgs["generator_dropout"],
-        mano_root=cfgs["mano_root"],
+        cfgs["decoder_hidden_size"],
+        cfgs["decoder_hidden1"],
+        cfgs["decoder_output"],
+        cfgs["decoder_dropout"],
         generator=True,
-        ncomps=cfgs["ncomps"],
     )
 
     generator_optimizer = optim.AdamW(
@@ -339,10 +339,6 @@ def objective(trial):
     generator_lr = trial.suggest_float("generator_lr", 5e-5, 1e-3, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
-    w1 = trial.suggest_float("w1", 0, 1)
-    w2 = trial.suggest_float("w2", 0, 1)
-    w3 = trial.suggest_float("w3", 0, 1)
-    w4 = trial.suggest_float("w4", 0, 1)
     num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
 
     trial_configs.update(
@@ -355,10 +351,6 @@ def objective(trial):
             "decoder_hidden_size": decoder_hidden_size,
             "generator_dropout": generator_dropout,
             "decoder_dropout": decoder_dropout,
-            "w1": w1,
-            "w2": w2,
-            "w3": w3,
-            "w4": w4,
             "delta1": delta1,
             "delta2": delta2,
             "weight_decay": weight_decay,
@@ -366,7 +358,14 @@ def objective(trial):
             "num_epochs": num_epochs,
         }
     )
-    decoder_criterion = Loss(delta1, delta2, w1, w2, w3, w4).criterion
+    decoder_criterion = Loss(
+        delta1,
+        delta2,
+        trial_configs["w1"],
+        trial_configs["w2"],
+        trial_configs["w3"],
+        trial_configs["w4"],
+    ).criterion
 
     try:
         train_loss, val_loss, train_dist, val_dist = train(
@@ -415,6 +414,7 @@ if __name__ == "__main__":
             configs["w4"],
         ).criterion
         train(configs, final_decoder_criterion)
+
     else:
         final_decoder_criterion = Loss(
             dec_pre_configs["delta1"],

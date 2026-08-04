@@ -73,11 +73,9 @@ model = AnatomyModel(
     configs["input_size"],
     configs["decoder_hidden_size"],
     configs["decoder_hidden1"],
-    configs["decoder_output_size"],
+    63,  # raw 21*3 coordinates, no MANO
     configs["decoder_dropout"],
-    mano_root=configs["mano_root"],
     generator=False,
-    ncomps=configs["ncomps"],
 ).to(device)
 
 weights = torch.load(
@@ -146,7 +144,6 @@ def evalModel(sample: Path):
                 b = batch.batch.to(device)
 
                 pred_coords = model(features, edge_index, b)
-                pred_coords = placeAtReference(pred_coords, coords_proj)
                 loss, dist = criterion(pred_coords, target)
 
                 test_dist += dist.item() * batch.num_graphs
@@ -212,7 +209,6 @@ def evalModel(sample: Path):
             points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
         fig = plt.figure(figsize=(14, 6))
-
         ax1 = fig.add_subplot(1, 2, 1, projection="3d")
         ax2 = fig.add_subplot(1, 2, 2, projection="3d")
 
@@ -238,5 +234,5 @@ if not sample_eval:
     test_loss, test_dist, avg_time = evalModel(None)
     print(f"Test Anatomy Loss {test_loss: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
-    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Clean/0000.jpg")
+    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Clean/4623.jpg")
     print(f"Average Time: {avg_time: .4f}")
