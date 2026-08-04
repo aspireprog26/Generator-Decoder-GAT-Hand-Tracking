@@ -12,7 +12,7 @@ from posttrain import Loss
 from pretrainer import Trainer as PreTrainer
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-from utils import Stats, placeAtReference  # CHANGED: was procrustesAlign
+from utils import Stats
 
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Dataset")
@@ -73,7 +73,7 @@ model = AnatomyModel(
     configs["input_size"],
     configs["decoder_hidden_size"],
     configs["decoder_hidden1"],
-    63,  # raw 21*3 coordinates, no MANO
+    configs["decoder_output_size"],
     configs["decoder_dropout"],
     generator=False,
 ).to(device)
@@ -205,7 +205,6 @@ def evalModel(sample: Path):
 
         with torch.inference_mode():
             pred_coords = model(feat, edge_index, batch)
-            pred_coords = placeAtReference(pred_coords, coords_proj)
             points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
         fig = plt.figure(figsize=(14, 6))
@@ -222,7 +221,6 @@ def evalModel(sample: Path):
         for _ in range(200):
             with torch.inference_mode():
                 pred_coords = model(feat, edge_index, batch)
-                pred_coords = placeAtReference(pred_coords, coords_proj)
                 points3D_corr = pred_coords.squeeze(0).cpu().numpy()
         t1 = time.time()
         avg_time = (t1 - t0) / 200

@@ -143,10 +143,17 @@ def train(cfgs: dict, criterion, trial=None):
         cfgs["input_size"],
         cfgs["decoder_hidden_size"],
         cfgs["decoder_hidden1"],
-        cfgs["decoder_output"],
+        cfgs["decoder_output_size"],
         cfgs["decoder_dropout"],
         generator=False,
     ).to(device)
+
+    weights = torch.load(
+        (Path(cfgs["model_dir"]) / f"pre{cfgs['decoder_model_name']}"),
+        weights_only=True,
+        map_location=device,
+    )
+    model.load_state_dict(weights)
 
     optimizer = optim.AdamW(
         model.parameters(),

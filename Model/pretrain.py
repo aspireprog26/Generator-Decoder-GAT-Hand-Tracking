@@ -262,7 +262,7 @@ def train(cfgs: dict, decoder_criterion, trial=None):
         cfgs["input_size"],
         cfgs["decoder_hidden_size"],
         cfgs["decoder_hidden1"],
-        cfgs["decoder_output"],
+        cfgs["decoder_output_size"],
         cfgs["decoder_dropout"],
         generator=False,
     )
@@ -284,10 +284,10 @@ def train(cfgs: dict, decoder_criterion, trial=None):
 
     generator_model = AnatomyModel(
         cfgs["input_size"],
-        cfgs["decoder_hidden_size"],
-        cfgs["decoder_hidden1"],
-        cfgs["decoder_output"],
-        cfgs["decoder_dropout"],
+        cfgs["generator_hidden_size"],
+        cfgs["generator_hidden1"],
+        cfgs["generator_output_size"],
+        cfgs["generator_dropout"],
         generator=True,
     )
 

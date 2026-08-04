@@ -6,7 +6,6 @@ import optuna
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
-from utils import placeAtReference
 
 
 class Trainer:
