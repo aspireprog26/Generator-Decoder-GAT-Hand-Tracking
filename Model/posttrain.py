@@ -97,10 +97,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 criterion = Loss(
     dec_post_configs["delta1"],
     dec_post_configs["delta2"],
-    dec_post_configs["w1"],
-    dec_post_configs["w2"],
-    dec_post_configs["w3"],
-    dec_post_configs["w4"],
+    0.5,
+    0.125,
+    0.125,
+    0.125,
 ).criterion
 
 
@@ -127,8 +127,6 @@ def createDataset(batch_size):
     train_loader = DataLoader(
         dataset=train_dataset,
         num_workers=dec_post_configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         drop_last=dec_post_configs["drop_last"],
@@ -137,8 +135,6 @@ def createDataset(batch_size):
     val_loader = DataLoader(
         dataset=val_dataset,
         num_workers=dec_post_configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         drop_last=dec_post_configs["drop_last"],
         collate_fn=collate,
@@ -184,7 +180,14 @@ def train(cfgs: dict, criterion, trial=None):
     trainer = Trainer(
         model, cfgs, train_loader, val_loader, optimizer, scheduler, criterion, device
     )
-    train_loss, val_loss, train_dist, val_dist = trainer.train(trial)
+    try:
+        train_loss, val_loss, train_dist, val_dist = trainer.train(trial)
+    except optuna.TrialPruned:
+        raise  # let Optuna's own pruning mechanism work normally
+    except Exception as e:  # noqa: BLE001
+        print(f"Trial {trial.number} failed with error: {e}")
+        raise optuna.TrialPruned()  # tell Optuna to treat this as a failed/pruned trial
+
     return train_loss, val_loss, train_dist, val_dist
 
 
@@ -192,7 +195,7 @@ def objective(trial):
     trial_configs = dec_post_configs.copy()
     num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
     decoder_dropout = trial.suggest_float("decoder_dropout", 0, 0.6)
-    lr_factor = trial.suggest_float("lr_factor", 0.05, 1)
+    lr_factor = trial.suggest_float("lr_factor", 0.05, 3)
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
 
@@ -222,6 +225,9 @@ if __name__ == "__main__":
         study = optuna.create_study(
             direction="minimize",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+            storage="sqlite:///posttrainsearch.db",  # persists progress to disk
+            study_name="posttrainsearch",
+            load_if_exists=True,  # resume if the process restarts
         )
         study.optimize(objective, n_trials=100)
 

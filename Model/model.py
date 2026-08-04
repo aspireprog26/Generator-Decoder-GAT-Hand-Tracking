@@ -109,7 +109,7 @@ class AnatomyModel(nn.Module):
         if self.generator:
             mean_mat = out[:, :63]
             # Add term to keep scale >> 0 to avoid exploding variance NLL computations
-            scale = self.softplus(out[:, 63]) + 1e-1
+            scale = self.softplus(out[:, 63]).clamp(min=1e-1, max=1e4) + 1e-1
 
             return mean_mat, scale
         else:

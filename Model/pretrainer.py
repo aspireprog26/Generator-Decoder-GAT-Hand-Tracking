@@ -216,7 +216,7 @@ class Trainer:
                 gen_samples += gen_batch.num_graphs
 
             print(
-                f"[Warmup] Epoch {epoch + 1} / {generator_warmup_epochs} | GenTL: {generator_train_loss / gen_samples:.5f}"
+                f"[Warmup] Epoch {epoch + 1} / {generator_warmup_epochs} | GenTL: {generator_train_loss / gen_samples:.6f}"
             )
 
         for epoch in range(self.num_epochs):
@@ -442,14 +442,14 @@ class Trainer:
             current_gen_lr = self.generator_optimizer.param_groups[0]["lr"]
             print(
                 f"Epoch: {epoch + 1} | "
-                f"DecTL: {decoder_train_loss: .5f} | "
-                f"DecTDL: {decoder_train_dist: .5f} | "
-                f"GenTL: {generator_train_loss: .5f} | "
-                f"DecVL: {decoder_val_loss: .5f} | "
-                f"DecVDL: {decoder_val_dist: .5f} | "
-                f"GenVL: {generator_val_loss: .5f} | "
-                f"DecLR: {current_dec_lr: .5f} | "
-                f"GenLR: {current_gen_lr: .5f}"
+                f"DecTL: {decoder_train_loss: .6f} | "
+                f"DecTDL: {decoder_train_dist: .6f} | "
+                f"GenTL: {generator_train_loss: .6f} | "
+                f"DecVL: {decoder_val_loss: .6f} | "
+                f"DecVDL: {decoder_val_dist: .6f} | "
+                f"GenVL: {generator_val_loss: .6f} | "
+                f"DecLR: {current_dec_lr: .6f} | "
+                f"GenLR: {current_gen_lr: .6f}"
             )
 
             if trial is not None:

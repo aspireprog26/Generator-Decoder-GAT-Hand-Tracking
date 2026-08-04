@@ -22,7 +22,7 @@ torch.cuda.manual_seed_all(SEED)
 g = torch.Generator()
 g.manual_seed(SEED)
 
-MODE = "optuna"
+MODE = "train"
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -165,6 +165,9 @@ def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
 
     _, m, n = X.shape
     cov_row = scale[:, None, None] * U
+    if not torch.isfinite(cov_row).all():
+        raise ValueError("Non-finite values in cov_row — skipping this trial")
+
     E = X - M
 
     logdet_U = torch.linalg.slogdet(cov_row).logabsdet
@@ -198,8 +201,6 @@ def createDataset(batch_size):
     decoder_train_loader = DataLoader(
         dataset=decoder_train_dataset,
         num_workers=configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateDecoder,
@@ -211,8 +212,6 @@ def createDataset(batch_size):
     decoder_val_loader = DataLoader(
         dataset=decoder_val_dataset,
         num_workers=configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
@@ -222,8 +221,6 @@ def createDataset(batch_size):
     generator_train_loader = DataLoader(
         dataset=generator_train_dataset,
         num_workers=configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateGenerator,
@@ -235,8 +232,6 @@ def createDataset(batch_size):
     generator_val_loader = DataLoader(
         dataset=generator_val_dataset,
         num_workers=configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
@@ -373,9 +368,16 @@ def objective(trial):
     )
     decoder_criterion = Loss(delta1, delta2, w1, w2, w3, w4).criterion
 
-    train_loss, val_loss, train_dist, val_dist = train(
-        trial_configs, decoder_criterion, trial
-    )
+    try:
+        train_loss, val_loss, train_dist, val_dist = train(
+            trial_configs, decoder_criterion, trial
+        )
+    except optuna.TrialPruned:
+        raise  # let Optuna's own pruning mechanism work normally
+    except Exception as e:  # noqa: BLE001
+        print(f"Trial {trial.number} failed with error: {e}")
+        raise optuna.TrialPruned()  # tell Optuna to treat this as a failed/pruned trial
+
     print(
         f"\nTrial Number: {trial.number} | "
         f"Train Loss: {train_loss: .4f} | "
@@ -391,6 +393,9 @@ if __name__ == "__main__":
         study = optuna.create_study(
             direction="minimize",
             pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+            storage="sqlite:///pretrainsearch.db",  # persists progress to disk
+            study_name="pretrainsearch",
+            load_if_exists=True,  # resume if the process restarts
         )
         study.optimize(objective, n_trials=100)
 
