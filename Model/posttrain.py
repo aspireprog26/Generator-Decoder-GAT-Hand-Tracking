@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
+MODE = "optuna"
+
 
 class Loss:
     def __init__(self, delta1, delta2, w1, w2, w3, w4):
@@ -81,8 +83,6 @@ class Loss:
         )
         return loss, dist_mean
 
-
-MODE = "optuna"
 
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
@@ -206,9 +206,9 @@ def objective(trial):
     print(
         f"\nTrial Number: {trial.number} | "
         f"Train Loss: {train_loss: .4f} | "
-        f"Train Anatomy: {train_dist: .4f} | "
+        f"Train VDL: {train_dist: .4f} | "
         f"Val Loss: {val_loss: .4f} | "
-        f"Val Anatomy: {val_dist:.4f}"
+        f"Val VDL: {val_dist:.4f}"
     )
     return val_loss
 

@@ -1,4 +1,5 @@
 import torch
+from manopth.manolayer import ManoLayer
 from torch import nn
 from torch_geometric.nn import GATConv
 
@@ -31,8 +32,9 @@ class GraphAttentionNet(nn.Module):
 
 
 class Regressor(nn.Module):
-    def __init__(self, input_size, hidden1, output_size, dropout):
+    def __init__(self, input_size, hidden1, output_size, dropout, mano=False):
         super().__init__()
+        self.mano = mano
 
         self.fc1 = nn.Linear(input_size, hidden1)
         self.layer_norm1 = nn.LayerNorm(hidden1)
@@ -52,7 +54,7 @@ class Regressor(nn.Module):
         x = self.layer_norm2(self.gelu(self.fc2(x)))
         x = self.dropout2(x)
 
-        return self.out(x)
+        return x if self.mano else self.out(x)
 
 
 class AnatomyModel(nn.Module):
@@ -87,3 +89,40 @@ class AnatomyModel(nn.Module):
             return mean_mat, scale
         else:
             return out.view(out.shape[0], 21, 3)  # raw (B, 21, 3) coordinates, no MANO
+
+
+class MANOModel(nn.Module):
+    def __init__(self, input_size, hidden_size, hidden1, dropout, mano_root, ncomps=6):
+        super().__init__()
+
+        self.ncomps = ncomps
+        self.gat = GraphAttentionNet(input_size, hidden_size, dropout)
+        self.regressor = Regressor(
+            21 * hidden_size, hidden1, ncomps, dropout, mano=True
+        )
+
+        self.mano_layer = ManoLayer(
+            mano_root=mano_root,
+            use_pca=True,
+            ncomps=ncomps,
+            side="right",
+            flat_hand_mean=False,
+        )
+
+        mano_param_dim = 3 + ncomps + 10
+        self.mano_out = nn.Linear(hidden1 // 2, mano_param_dim)
+
+    def forward(self, features, edge_index, batch):
+        gat = self.gat(features, edge_index, batch)
+        out = self.regressor(gat)
+
+        params = self.mano_out(out)
+
+        global_rot = params[:, :3]
+        pose_pca = params[:, 3 : 3 + self.ncomps]
+        shape = params[:, 3 + self.ncomps : 3 + self.ncomps + 10]
+
+        pose = torch.cat([global_rot, pose_pca], dim=1)  # (B, 3+ncomps)
+
+        _, joints = self.mano_layer(pose, shape)
+        return joints

@@ -88,6 +88,7 @@ class Trainer:
         )
         self.generator_mean = generator_stats[0].to(self.device, dtype=torch.float32)
         self.generator_std = generator_stats[1].to(self.device, dtype=torch.float32)
+
         self.min_delta = configs["es_thresh"]
         self.best_loss = np.inf
 
@@ -149,10 +150,14 @@ class Trainer:
     def features(self, coords, left_kps, right_kps, noise=None, eps=1e-8):
         coords = coords.float()
         scale = torch.linalg.norm(coords[:, 9] - coords[:, 0], dim=-1).clamp_min(eps)
-        _ = (coords - scale[:, None, None] * noise) if noise is not None else coords
-        features = self.getFeatures(_, left_kps, right_kps, eps)
-        scale = torch.linalg.norm(_[:, 9] - _[:, 0], dim=-1).clamp_min(eps)
-        return features, _, scale
+        coords_proj = (
+            (coords - scale[:, None, None] * noise) if noise is not None else coords
+        )
+        features = self.getFeatures(coords_proj, left_kps, right_kps, eps)
+        scale = torch.linalg.norm(
+            coords_proj[:, 9] - coords_proj[:, 0], dim=-1
+        ).clamp_min(eps)
+        return features, coords_proj, scale
 
     def standardize(self, features, decoder: bool = True):
         mean = self.decoder_mean if decoder else self.generator_mean

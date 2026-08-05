@@ -50,10 +50,10 @@ configs = {
     "w4": (0.5 / 3),
 }
 
+
 # For fine tuning after optuna trials are complete, MODE="train"
-with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_pre_configs = json.load(f)
-dec_pre_configs.update({"num_epochs": 120})
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
 
@@ -380,9 +380,9 @@ def objective(trial):
     print(
         f"\nTrial Number: {trial.number} | "
         f"Train Loss: {train_loss: .4f} | "
-        f"Train Anatomy: {train_dist: .4f} | "
+        f"Train VDL: {train_dist: .4f} | "
         f"Val Loss: {val_loss: .4f} | "
-        f"Val Anatomy: {val_dist:.4f}"
+        f"Val VDL: {val_dist:.4f}"
     )
     return val_loss
 
@@ -404,7 +404,7 @@ if __name__ == "__main__":
             print(f"{key}: {value}")
 
         configs.update(study.best_params)
-        saveConfigs(configs, "optunaconfigs")
+        saveConfigs(configs, "decpreconfigs")
         final_decoder_criterion = Loss(
             configs["delta1"],
             configs["delta2"],
