@@ -18,7 +18,8 @@ SEED = 42
 g = torch.Generator()
 g.manual_seed(SEED)
 
-MODE = "optuna"
+MODE = "train"
+
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -391,12 +392,12 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
             storage="sqlite:///pretrainsearch.db",  # persists progress to disk
             study_name="pretrainsearch",
             load_if_exists=True,  # resume if the process restarts
         )
-        study.optimize(objective, n_trials=100)
+        study.optimize(objective, n_trials=50)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")

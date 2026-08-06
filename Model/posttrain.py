@@ -217,12 +217,12 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
             storage="sqlite:///posttrainsearch.db",
             study_name="posttrainsearch",
             load_if_exists=True,
         )
-        study.optimize(objective, n_trials=100)
+        study.optimize(objective, n_trials=75)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
