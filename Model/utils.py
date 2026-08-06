@@ -46,7 +46,7 @@ with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r")
 
 
 def stereoTransform(pred_coords, coords_proj):
-    pred_centroid = pred_coords.mean(dim=1, keepdim=True)
+    pred_centroid = pred_coords[:, PALM].mean(dim=1, keepdim=True)
     pred_centered = pred_coords - pred_centroid
 
     pred_scale = torch.linalg.norm(
@@ -57,11 +57,11 @@ def stereoTransform(pred_coords, coords_proj):
     true_scale = torch.linalg.norm(
         coords_proj[:, 9] - coords_proj[:, 0], dim=-1, keepdim=True
     )
-    true_centroid = coords_proj.mean(dim=1, keepdim=True)
+    true_centroid = coords_proj[:, PALM].mean(dim=1, keepdim=True)
 
     translation_pred = pred_centered + true_centroid
     transformed_pred = pred_normalized * true_scale.unsqueeze(-1) + true_centroid
-    return transformed_pred
+    return translation_pred, transformed_pred
 
 
 def procrustesAlign(
