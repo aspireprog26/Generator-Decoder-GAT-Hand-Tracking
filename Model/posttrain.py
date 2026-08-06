@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
-MODE = "optuna"
+MODE = "train"
 
 
 class Loss:
@@ -84,7 +84,7 @@ class Loss:
         return loss, dist_mean
 
 
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -222,7 +222,7 @@ if __name__ == "__main__":
             study_name="posttrainsearch",
             load_if_exists=True,
         )
-        study.optimize(objective, n_trials=75)
+        study.optimize(objective, n_trials=65)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
