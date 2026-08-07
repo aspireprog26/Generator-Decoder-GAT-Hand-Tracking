@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
-MODE = "train"
+MODE = "optuna"
 
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
@@ -45,8 +45,11 @@ configs.update(
     {"delta1": dec_post_configs["delta1"], "delta2": dec_post_configs["delta2"]}
 )
 
+# For post Optuna fine tuning
+"""
 with open("/home/miket/Documents/Hand-Tracking-2/Model/manoconfigs.json", "r") as f:
     configs = json.load(f)
+"""
 
 
 class Loss:
@@ -245,6 +248,7 @@ def objective(trial):
     trial_configs = configs.copy()
     num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
     dropout = trial.suggest_float("dropout", 0, 0.6)
+    ncomps = trial.suggest_int("ncomps", 6, 45)
     lr = trial.suggest_float("lr", 5e-5, 1e-3, log=True)
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
@@ -257,6 +261,7 @@ def objective(trial):
             "hidden_size": hidden_size,
             "hidden1": hidden1,
             "dropout": dropout,
+            "ncomps": ncomps,
             "batch_size": batch_size,
             "weight_decay": weight_decay,
             "lr": lr,
@@ -283,7 +288,7 @@ if __name__ == "__main__":
             study_name="manotrainsearch",
             load_if_exists=True,
         )
-        study.optimize(objective, n_trials=75)
+        study.optimize(objective, n_trials=100)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
