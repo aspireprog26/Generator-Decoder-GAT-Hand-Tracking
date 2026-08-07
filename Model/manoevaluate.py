@@ -95,7 +95,7 @@ mano_model = MANOModel(
     mano_configs["dropout"],
     mano_configs["mano_root"],
     mano_configs["ncomps"],
-)
+).to(device)
 
 mano_weights = torch.load(
     (Path(mano_configs["model_dir"]) / f"{mano_configs['model_name']}"),
@@ -173,7 +173,7 @@ def evalModel(sample: Path):
                 updated_features = standardize(updated_features, decoder=False)
                 pred_coords = mano_model(updated_features, edge_index, b)
                 pred_coords = procrustesAlign(pred_coords, joint_pred_coords)
-
+                pred_coords = stereoTransform(pred_coords, coords_proj)[0]
                 loss, dist = criterion(pred_coords, target)
 
                 test_dist += dist.item() * batch.num_graphs
@@ -238,7 +238,7 @@ def evalModel(sample: Path):
             updated_features = mano_feats(raw_feat, joint_pred_coords)
             updated_features = standardize(updated_features, decoder=False)
             pred_coords = mano_model(updated_features, edge_index, batch)
-            pred_coords = procrustesAlign(pred_coords, joint_pred_coords)
+            # pred_coords = procrustesAlign(pred_coords, joint_pred_coords)
             points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
         print(coords_proj)
@@ -273,5 +273,5 @@ if not sample_eval:
     test_loss, test_dist, avg_time = evalModel(None)
     print(f"Test Anatomy Loss {test_loss: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
-    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Clean/4623.jpg")
+    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Clean/0000.jpg")
     print(f"Average Time: {avg_time: .4f}")

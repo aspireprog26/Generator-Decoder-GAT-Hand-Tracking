@@ -26,7 +26,7 @@ configs = {
     "lr": 1e-3,
     "batch_size": 64,
     "input_size": 19,
-    "ncomps": 6,
+    "ncomps": 45,
     "num_epochs": 100,
     "hidden_size": 32,
     "hidden1": 480,
@@ -44,6 +44,9 @@ configs = {
 configs.update(
     {"delta1": dec_post_configs["delta1"], "delta2": dec_post_configs["delta2"]}
 )
+
+with open("/home/miket/Documents/Hand-Tracking-2/Model/manoconfigs.json", "r") as f:
+    configs = json.load(f)
 
 
 class Loss:
@@ -199,7 +202,7 @@ def train(cfgs: dict, criterion, trial=None):
         cfgs["dropout"],
         cfgs["mano_root"],
         cfgs["ncomps"],
-    )
+    ).to(device)
 
     optimizer = optim.AdamW(
         mano_model.parameters(),
@@ -275,12 +278,12 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
             storage="sqlite:///manotrainsearch.db",
             study_name="manotrainsearch",
             load_if_exists=True,
         )
-        study.optimize(objective, n_trials=65)
+        study.optimize(objective, n_trials=75)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
