@@ -14,15 +14,12 @@ from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
 # Must use for reproducability
 SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
 
 g = torch.Generator()
 g.manual_seed(SEED)
 
-MODE = "optuna"
+MODE = "train"
+
 configs = {
     "decoder_lr": 1e-3,
     "generator_lr": 1e-3,
@@ -33,16 +30,14 @@ configs = {
     "decoder_hidden_size": 32,
     "generator_hidden1": 128,
     "decoder_hidden1": 64,
-    "ncomps": 6,
     "generator_output_size": 64,
-    "decoder_output_size": 19,  # ncomps(6) + 10 + 3 -- translation term removed
+    "decoder_output_size": 63,
     "num_workers": 12,
     "num_epochs": 100,
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
     "model_dir": "/home/miket/Documents/Hand-Tracking-2/Model",
-    "mano_root": "/home/miket/Documents/mano/models",
     "stb_dir": "/home/miket/Documents/StereoSTBDataset",
     "stereo_data_dir": "/home/miket/Documents/StereoDataset",
     "es_patience": 10,
@@ -50,10 +45,15 @@ configs = {
     "scheduler_factor": 0.5,
     "scheduler_patience": 5,
     "drop_last": False,
+    "w1": 0.5,
+    "w2": (0.5 / 3),
+    "w3": (0.5 / 3),
+    "w4": (0.5 / 3),
 }
 
+
 # For fine tuning after optuna trials are complete, MODE="train"
-with open("/home/miket/Documents/Hand-Tracking-2/Model/optunaconfigs.json", "r") as f:
+with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_pre_configs = json.load(f)
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
@@ -165,6 +165,9 @@ def generatorCriterion(X, M, scale, U, Vinv, logdet_V, device):
 
     _, m, n = X.shape
     cov_row = scale[:, None, None] * U
+    if not torch.isfinite(cov_row).all():
+        raise ValueError("Non-finite values in cov_row — skipping this trial")
+
     E = X - M
 
     logdet_U = torch.linalg.slogdet(cov_row).logabsdet
@@ -198,8 +201,6 @@ def createDataset(batch_size):
     decoder_train_loader = DataLoader(
         dataset=decoder_train_dataset,
         num_workers=configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateDecoder,
@@ -211,8 +212,6 @@ def createDataset(batch_size):
     decoder_val_loader = DataLoader(
         dataset=decoder_val_dataset,
         num_workers=configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         collate_fn=collateDecoder,
         drop_last=configs["drop_last"],
@@ -222,8 +221,6 @@ def createDataset(batch_size):
     generator_train_loader = DataLoader(
         dataset=generator_train_dataset,
         num_workers=configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         collate_fn=collateGenerator,
@@ -235,8 +232,6 @@ def createDataset(batch_size):
     generator_val_loader = DataLoader(
         dataset=generator_val_dataset,
         num_workers=configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         collate_fn=collateGenerator,
         drop_last=configs["drop_last"],
@@ -252,6 +247,11 @@ def createDataset(batch_size):
 
 
 def train(cfgs: dict, decoder_criterion, trial=None):
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+    np.random.seed(SEED)
+    random.seed(SEED)
+
     (
         decoder_train_loader,
         decoder_val_loader,
@@ -265,9 +265,7 @@ def train(cfgs: dict, decoder_criterion, trial=None):
         cfgs["decoder_hidden1"],
         cfgs["decoder_output_size"],
         cfgs["decoder_dropout"],
-        mano_root=cfgs["mano_root"],
         generator=False,
-        ncomps=cfgs["ncomps"],
     )
 
     decoder_optimizer = optim.AdamW(
@@ -291,9 +289,7 @@ def train(cfgs: dict, decoder_criterion, trial=None):
         cfgs["generator_hidden1"],
         cfgs["generator_output_size"],
         cfgs["generator_dropout"],
-        mano_root=cfgs["mano_root"],
         generator=True,
-        ncomps=cfgs["ncomps"],
     )
 
     generator_optimizer = optim.AdamW(
@@ -344,10 +340,6 @@ def objective(trial):
     generator_lr = trial.suggest_float("generator_lr", 5e-5, 1e-3, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
     batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
-    w1 = trial.suggest_float("w1", 0, 1)
-    w2 = trial.suggest_float("w2", 0, 1)
-    w3 = trial.suggest_float("w3", 0, 1)
-    w4 = trial.suggest_float("w4", 0, 1)
     num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
 
     trial_configs.update(
@@ -360,10 +352,6 @@ def objective(trial):
             "decoder_hidden_size": decoder_hidden_size,
             "generator_dropout": generator_dropout,
             "decoder_dropout": decoder_dropout,
-            "w1": w1,
-            "w2": w2,
-            "w3": w3,
-            "w4": w4,
             "delta1": delta1,
             "delta2": delta2,
             "weight_decay": weight_decay,
@@ -371,17 +359,31 @@ def objective(trial):
             "num_epochs": num_epochs,
         }
     )
-    decoder_criterion = Loss(delta1, delta2, w1, w2, w3, w4).criterion
+    decoder_criterion = Loss(
+        delta1,
+        delta2,
+        trial_configs["w1"],
+        trial_configs["w2"],
+        trial_configs["w3"],
+        trial_configs["w4"],
+    ).criterion
 
-    train_loss, val_loss, train_dist, val_dist = train(
-        trial_configs, decoder_criterion, trial
-    )
+    try:
+        train_loss, val_loss, train_dist, val_dist = train(
+            trial_configs, decoder_criterion, trial
+        )
+    except optuna.TrialPruned:
+        raise  # let Optuna's own pruning mechanism work normally
+    except Exception as e:  # noqa: BLE001
+        print(f"Trial {trial.number} failed with error: {e}")
+        raise optuna.TrialPruned()  # tell Optuna to treat this as a failed/pruned trial
+
     print(
         f"\nTrial Number: {trial.number} | "
         f"Train Loss: {train_loss: .4f} | "
-        f"Train Anatomy: {train_dist: .4f} | "
+        f"Train VDL: {train_dist: .4f} | "
         f"Val Loss: {val_loss: .4f} | "
-        f"Val Anatomy: {val_dist:.4f}"
+        f"Val VDL: {val_dist:.4f}"
     )
     return val_loss
 
@@ -390,9 +392,12 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
+            storage="sqlite:///pretrainsearch.db",  # persists progress to disk
+            study_name="pretrainsearch",
+            load_if_exists=True,  # resume if the process restarts
         )
-        study.optimize(objective, n_trials=100)
+        study.optimize(objective, n_trials=50)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
@@ -400,7 +405,7 @@ if __name__ == "__main__":
             print(f"{key}: {value}")
 
         configs.update(study.best_params)
-        saveConfigs(configs, "optunaconfigs")
+        saveConfigs(configs, "decpreconfigs")
         final_decoder_criterion = Loss(
             configs["delta1"],
             configs["delta2"],
@@ -410,6 +415,7 @@ if __name__ == "__main__":
             configs["w4"],
         ).criterion
         train(configs, final_decoder_criterion)
+
     else:
         final_decoder_criterion = Loss(
             dec_pre_configs["delta1"],

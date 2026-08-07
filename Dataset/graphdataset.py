@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import torch
-from handedgeindex import hand_edge_index
+from Dataset.handedgeindex import hand_edge_index
 from torch_geometric.data import Data
 
 

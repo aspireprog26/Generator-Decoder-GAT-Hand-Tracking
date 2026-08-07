@@ -12,15 +12,13 @@ from posttrain import Loss
 from pretrainer import Trainer as PreTrainer
 from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
-from utils import Stats, placeAtReference  # CHANGED: was procrustesAlign
+from utils import Stats, stereoTransform
 
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
 sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Dataset")
 
 from handedgeindex import hand_edge_index  # type: ignore
 from keypointdetection import HAND_SKELETON, MediaPipe  # type: ignore
-
-PALM = [0, 1, 5, 9, 13, 17]
 
 sample_eval = True
 
@@ -75,9 +73,7 @@ model = AnatomyModel(
     configs["decoder_hidden1"],
     configs["decoder_output_size"],
     configs["decoder_dropout"],
-    mano_root=configs["mano_root"],
     generator=False,
-    ncomps=configs["ncomps"],
 ).to(device)
 
 weights = torch.load(
@@ -146,7 +142,7 @@ def evalModel(sample: Path):
                 b = batch.batch.to(device)
 
                 pred_coords = model(features, edge_index, b)
-                pred_coords = placeAtReference(pred_coords, coords_proj)
+                pred_coords = stereoTransform(pred_coords, coords_proj)[0]
                 loss, dist = criterion(pred_coords, target)
 
                 test_dist += dist.item() * batch.num_graphs
@@ -208,11 +204,13 @@ def evalModel(sample: Path):
 
         with torch.inference_mode():
             pred_coords = model(feat, edge_index, batch)
-            pred_coords = placeAtReference(pred_coords, coords_proj)
+            pred_coords = stereoTransform(pred_coords, coords_proj)[0]
             points3D_corr = pred_coords.squeeze(0).cpu().numpy()
 
-        fig = plt.figure(figsize=(14, 6))
+        print(coords_proj)
+        print(pred_coords)
 
+        fig = plt.figure(figsize=(14, 6))
         ax1 = fig.add_subplot(1, 2, 1, projection="3d")
         ax2 = fig.add_subplot(1, 2, 2, projection="3d")
 
@@ -223,13 +221,12 @@ def evalModel(sample: Path):
         plt.show()
 
         t0 = time.time()
-        for _ in range(200):
+        for _ in range(500):
             with torch.inference_mode():
                 pred_coords = model(feat, edge_index, batch)
-                pred_coords = placeAtReference(pred_coords, coords_proj)
                 points3D_corr = pred_coords.squeeze(0).cpu().numpy()
         t1 = time.time()
-        avg_time = (t1 - t0) / 200
+        avg_time = (t1 - t0) / 500
 
     return test_loss, test_dist, avg_time
 
@@ -238,5 +235,5 @@ if not sample_eval:
     test_loss, test_dist, avg_time = evalModel(None)
     print(f"Test Anatomy Loss {test_loss: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
-    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Clean/0000.jpg")
+    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Noisy/4000.jpg")
     print(f"Average Time: {avg_time: .4f}")

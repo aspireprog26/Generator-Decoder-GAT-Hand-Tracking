@@ -6,7 +6,6 @@ import optuna
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
-from utils import placeAtReference
 
 
 class Trainer:
@@ -89,6 +88,7 @@ class Trainer:
         )
         self.generator_mean = generator_stats[0].to(self.device, dtype=torch.float32)
         self.generator_std = generator_stats[1].to(self.device, dtype=torch.float32)
+
         self.min_delta = configs["es_thresh"]
         self.best_loss = np.inf
 
@@ -216,7 +216,7 @@ class Trainer:
                 gen_samples += gen_batch.num_graphs
 
             print(
-                f"[Warmup] Epoch {epoch + 1} / {generator_warmup_epochs} | GenTL: {generator_train_loss / gen_samples:.5f}"
+                f"[Warmup] Epoch {epoch + 1} / {generator_warmup_epochs} | GenTL: {generator_train_loss / gen_samples:.6f}"
             )
 
         for epoch in range(self.num_epochs):
@@ -306,7 +306,7 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                normalized_features, coords_proj, _ = self.features(
+                normalized_features, _, _ = self.features(
                     decoder_coords, left_kps, right_kps, noise
                 )  # Distorted 3D normalized features with noise
                 normalized_features = self.standardize(normalized_features)
@@ -314,8 +314,6 @@ class Trainer:
                 pred_coords = self.decoder_model(
                     normalized_features, decoder_edge_index, decoder_b
                 )
-                pred_coords = placeAtReference(pred_coords, coords_proj)
-
                 decoder_loss, dist = self.decoder_criterion(pred_coords, decoder_coords)
 
                 decoder_loss.backward()
@@ -370,7 +368,7 @@ class Trainer:
                         self.chol_row @ Z @ self.chol_col.T
                     )
 
-                    normalized_features, coords_proj, _ = self.features(
+                    normalized_features, _, _ = self.features(
                         decoder_coords, left_kps, right_kps, noise
                     )
                     normalized_features = self.standardize(normalized_features)
@@ -378,8 +376,6 @@ class Trainer:
                     pred_coords = self.decoder_model(
                         normalized_features, decoder_edge_index, decoder_b
                     )
-                    pred_coords = placeAtReference(pred_coords, coords_proj)
-
                     decoder_loss, dist = self.decoder_criterion(
                         pred_coords, decoder_coords
                     )
@@ -442,14 +438,14 @@ class Trainer:
             current_gen_lr = self.generator_optimizer.param_groups[0]["lr"]
             print(
                 f"Epoch: {epoch + 1} | "
-                f"DecTL: {decoder_train_loss: .5f} | "
-                f"DecTDL: {decoder_train_dist: .5f} | "
-                f"GenTL: {generator_train_loss: .5f} | "
-                f"DecVL: {decoder_val_loss: .5f} | "
-                f"DecVDL: {decoder_val_dist: .5f} | "
-                f"GenVL: {generator_val_loss: .5f} | "
-                f"DecLR: {current_dec_lr: .5f} | "
-                f"GenLR: {current_gen_lr: .5f}"
+                f"DecTL: {decoder_train_loss: .6f} | "
+                f"DecTDL: {decoder_train_dist: .6f} | "
+                f"GenTL: {generator_train_loss: .6f} | "
+                f"DecVL: {decoder_val_loss: .6f} | "
+                f"DecVDL: {decoder_val_dist: .6f} | "
+                f"GenVL: {generator_val_loss: .6f} | "
+                f"DecLR: {current_dec_lr: .6f} | "
+                f"GenLR: {current_gen_lr: .6f}"
             )
 
             if trial is not None:

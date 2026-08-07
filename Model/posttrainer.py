@@ -1,12 +1,10 @@
 from pathlib import Path
 
-# import earlystopper as es
 import numpy as np
 import optuna
 import torch
 from torch import device, nn, optim
 from torch.utils.data import DataLoader
-from utils import placeAtReference  # CHANGED: was procrustesAlign
 
 
 class Trainer:
@@ -70,8 +68,7 @@ class Trainer:
                 b = batch.batch.to(self.device)
 
                 self.optimizer.zero_grad()
-                pred_coords = self.model(features, edge_index, b)
-                pred_coords = placeAtReference(pred_coords, coords_proj)
+                pred_coords = self.model(features, edge_index, b)  # (B, 21, 3) directly
                 loss, dist = self.criterion(pred_coords, target)
 
                 loss.backward()
@@ -103,7 +100,6 @@ class Trainer:
                     b = batch.batch.to(self.device)
 
                     pred_coords = self.model(features, edge_index, b)
-                    pred_coords = placeAtReference(pred_coords, coords_proj)
                     loss, dist = self.criterion(pred_coords, target)
 
                     val_dist += dist.item() * batch.num_graphs

@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
+MODE = "train"
+
 
 class Loss:
     def __init__(self, delta1, delta2, w1, w2, w3, w4):
@@ -82,16 +84,13 @@ class Loss:
         return loss, dist_mean
 
 
-MODE = "optuna"
-
+"""
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
-
 """
-For post-optuna fine-tuning
+
 with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
-"""
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 criterion = Loss(
@@ -127,8 +126,6 @@ def createDataset(batch_size):
     train_loader = DataLoader(
         dataset=train_dataset,
         num_workers=dec_post_configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         shuffle=True,
         drop_last=dec_post_configs["drop_last"],
@@ -137,8 +134,6 @@ def createDataset(batch_size):
     val_loader = DataLoader(
         dataset=val_dataset,
         num_workers=dec_post_configs["num_workers"],
-        pin_memory=True,
-        persistent_workers=True,
         batch_size=batch_size,
         drop_last=dec_post_configs["drop_last"],
         collate_fn=collate,
@@ -148,15 +143,14 @@ def createDataset(batch_size):
 
 def train(cfgs: dict, criterion, trial=None):
     train_loader, val_loader = createDataset(cfgs["batch_size"])
+
     model = AnatomyModel(
         cfgs["input_size"],
         cfgs["decoder_hidden_size"],
         cfgs["decoder_hidden1"],
         cfgs["decoder_output_size"],
         cfgs["decoder_dropout"],
-        mano_root=cfgs["mano_root"],
         generator=False,
-        ncomps=cfgs["ncomps"],
     ).to(device)
 
     weights = torch.load(
@@ -184,7 +178,14 @@ def train(cfgs: dict, criterion, trial=None):
     trainer = Trainer(
         model, cfgs, train_loader, val_loader, optimizer, scheduler, criterion, device
     )
-    train_loss, val_loss, train_dist, val_dist = trainer.train(trial)
+    try:
+        train_loss, val_loss, train_dist, val_dist = trainer.train(trial)
+    except optuna.TrialPruned:
+        raise
+    except Exception as e:  # noqa: BLE001
+        print(f"Trial {trial.number} failed with error: {e}")
+        raise optuna.TrialPruned()
+
     return train_loss, val_loss, train_dist, val_dist
 
 
@@ -192,8 +193,8 @@ def objective(trial):
     trial_configs = dec_post_configs.copy()
     num_epochs = trial.suggest_int("num_epochs", 30, 150, step=10)
     decoder_dropout = trial.suggest_float("decoder_dropout", 0, 0.6)
-    lr_factor = trial.suggest_float("lr_factor", 0.05, 1)
-    batch_size = trial.suggest_categorical("batch_size", [16, 32, 64, 128])
+    lr_factor = trial.suggest_float("lr_factor", 0.1, 10)
+    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
     weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
 
     trial_configs.update(
@@ -210,9 +211,9 @@ def objective(trial):
     print(
         f"\nTrial Number: {trial.number} | "
         f"Train Loss: {train_loss: .4f} | "
-        f"Train Anatomy: {train_dist: .4f} | "
+        f"Train VDL: {train_dist: .4f} | "
         f"Val Loss: {val_loss: .4f} | "
-        f"Val Anatomy: {val_dist:.4f}"
+        f"Val VDL: {val_dist:.4f}"
     )
     return val_loss
 
@@ -221,9 +222,12 @@ if __name__ == "__main__":
     if MODE == "optuna":
         study = optuna.create_study(
             direction="minimize",
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=15),
+            storage="sqlite:///posttrainsearch.db",
+            study_name="posttrainsearch",
+            load_if_exists=True,
         )
-        study.optimize(objective, n_trials=100)
+        study.optimize(objective, n_trials=65)
 
         print(f"Best loss: {study.best_value}")
         print("\nBest parameters:")
