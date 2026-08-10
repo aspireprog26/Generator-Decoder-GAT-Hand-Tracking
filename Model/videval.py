@@ -109,40 +109,9 @@ def collate(batch):
     return (batch, targets, coords_proj)
 
 
-def plot(ax, points3D, orig=True):
-    ax.zaxis.set_inverted(True)
-    ax.view_init(elev=220, azim=130, roll=0)
-
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-
-    ax.scatter(
-        points3D[:, 0],
-        points3D[:, 1],
-        points3D[:, 2],
-        color=(196 / 255, 12 / 255, 27 / 255),
-        s=15,
-    )
-
-    for start, end in HAND_SKELETON:
-        ax.plot(
-            [points3D[start, 0], points3D[end, 0]],
-            [points3D[start, 1], points3D[end, 1]],
-            [points3D[start, 2], points3D[end, 2]],
-            "b-",
-        )
-
-    ax.set_title(
-        "Raw 3D Projected Stereo Mapped Hand Keypoints"
-        if orig
-        else "Corrected 3D Projected Stereo Mapped Hand Keypoints"
-    )
-
-
 def setupAxis(ax, title, point_color, line_style):
     ax.zaxis.set_inverted(True)
-    ax.view_init(elev=220, azim=130, roll=0)
+    ax.view_init(elev=90, azim=130, roll=0)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
@@ -367,7 +336,6 @@ def evalVideo(sample: str, alpha: float = EMA_ALPHA):
         raise ValueError(f"No frames could be read from video: {sample}")
 
     avg_time = sum(frame_times) / len(frame_times)
-
     animatePlot(frames_video, frames_orig, frames_corr, fps=fps)
 
     return avg_time
