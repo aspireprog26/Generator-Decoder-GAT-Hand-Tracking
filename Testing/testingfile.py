@@ -68,7 +68,7 @@ def plot(ax, points3D, orig=True):
 
 if __name__ == "__main__":
     pose = MediaPipe()
-    image = cv2.imread("/home/miket/Documents/StereoDataset/Noisy/3990.jpg")
+    image = cv2.imread("/home/miket/Documents/StereoDataset/Clean/0165.jpg")
     h, w = image.shape[:2]
     half = w // 2
 

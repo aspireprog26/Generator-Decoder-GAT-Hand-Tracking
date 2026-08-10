@@ -235,5 +235,5 @@ if not sample_eval:
     test_loss, test_dist, avg_time = evalModel(None)
     print(f"Test Anatomy Loss {test_loss: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
-    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Noisy/4000.jpg")
+    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Clean/0165.jpg")
     print(f"Average Time: {avg_time: .4f}")
