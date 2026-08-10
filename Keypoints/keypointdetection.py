@@ -314,13 +314,15 @@ class RTMPose:
 
 
 class MediaPipe:
-    def __init__(self):
+    def __init__(self, model_complexity=1, detection_scale=0.5):
         self.mp_hands = mp.solutions.hands
         self.mp_draw = mp.solutions.drawing_utils
+        self.detection_scale = detection_scale
 
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=1,
+            model_complexity=model_complexity,
             min_detection_confidence=0.3,
         )
 
@@ -329,14 +331,26 @@ class MediaPipe:
         handedness_label = None
         handedness_score = 0.0
 
+        h, w, _ = frame.shape
+
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        if self.detection_scale != 1.0:
+            rgb_frame = cv2.resize(
+                rgb_frame,
+                (
+                    max(1, int(w * self.detection_scale)),
+                    max(1, int(h * self.detection_scale)),
+                ),
+                interpolation=cv2.INTER_LINEAR,
+            )
+
         results = self.hands.process(rgb_frame)
 
         if results.multi_hand_landmarks:
             for hand_landmarks, hand_info in zip(
                 results.multi_hand_landmarks, results.multi_handedness
             ):
-                h, w, _ = frame.shape
                 for idx, lm in enumerate(hand_landmarks.landmark):
                     px, py = int(lm.x * w), int(lm.y * h)
                     kps[idx] = [px, py]
@@ -344,9 +358,9 @@ class MediaPipe:
                 handedness_label = hand_info.classification[0].label
 
                 # If the image is not selfie view / mirrored
-                # handedness_label = "Left" if handedness_label == "Right" else "Right"
-
+                handedness_label = "Left" if handedness_label == "Right" else "Right"
                 handedness_score = hand_info.classification[0].score
+
         return kps, handedness_label, handedness_score
 
     def draw_hand(self, coords, frame):
@@ -358,14 +372,14 @@ class MediaPipe:
             pt1 = (round(p1[0]), round(p1[1]))
             pt2 = (round(p2[0]), round(p2[1]))
             cv2.line(
-                frame, pt1, pt2, (12, 27, 196), 2
+                frame, pt1, pt2, (12, 27, 196), 5
             )  # Color the lines of the keypoint skeleton
 
         for i in range(21):
             x = coords[i][0]
             y = coords[i][1]
             center = (round(x), round(y))
-            cv2.circle(frame, center, 5, (0, 0, 255), -1)  # Inner circle
-            cv2.circle(frame, center, 5, (0, 0, 0), 1)  # Border circle
+            cv2.circle(frame, center, 7, (0, 0, 255), -1)  # Inner circle
+            cv2.circle(frame, center, 7, (0, 0, 0), 1)  # Border circle
 
         return frame

@@ -1,0 +1,12 @@
+optuna
+git+https://github.com/hassony2/manopth.git
+torch --index-url https://download.pytorch.org/whl/cu124
+torch_geometric
+chumpy
+numpy<1.24
+opencv-python
+scipy
+mediapipe==0.10.14
+numpy
+pynput
+tqdm
