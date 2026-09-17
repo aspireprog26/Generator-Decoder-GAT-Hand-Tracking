@@ -58,10 +58,10 @@ def filterFiles(data_dir: str):
 
 if __name__ == "__main__":
     print("Training:")
-    filterFiles("/home/miket/Documents/StereoDataset/Training")
+    filterFiles("/StereoDataset/Training")
 
     print("\nValidation:")
-    filterFiles("/home/miket/Documents/StereoDataset/Validation")
+    filterFiles("/StereoDataset/Validation")
 
     print("\nTesting")
-    filterFiles("/home/miket/Documents/StereoDataset/Testing")
+    filterFiles("/StereoDataset/Testing")
