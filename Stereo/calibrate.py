@@ -5,13 +5,13 @@ import numpy as np
 
 PATTERN_SIZE = (8, 5)  # Size of checkerboard inner corners
 SQUARE_SIZE = 0.038  # In meters
-DIR = r"C:\Users\Test\Documents\StereoImages\Stereo2"
+DIR = "/StereoImages/Stereo2"
 
 
 def calibrate():
     dir = Path(DIR)
     fs = cv2.FileStorage(
-        r"C:\Users\Test\Documents\Hand-Tracking\Stereo\stereo.yml",
+        "/Hand-Tracking/Stereo/stereo.yml",
         cv2.FILE_STORAGE_WRITE,
     )
     img_size = None
