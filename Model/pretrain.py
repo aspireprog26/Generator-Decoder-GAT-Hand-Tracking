@@ -37,9 +37,9 @@ configs = {
     "weight_decay": 1e-2,
     "decoder_model_name": "decoder.pth",
     "generator_model_name": "generator.pth",
-    "model_dir": "/home/miket/Documents/Hand-Tracking-2/Model",
-    "stb_dir": "/home/miket/Documents/StereoSTBDataset",
-    "stereo_data_dir": "/home/miket/Documents/StereoDataset",
+    "model_dir": "/Hand-Tracking-2/Model",
+    "stb_dir": "/StereoSTBDataset",
+    "stereo_data_dir": "/StereoDataset",
     "es_patience": 10,
     "es_thresh": 1e-4,
     "scheduler_factor": 0.5,
@@ -53,7 +53,7 @@ configs = {
 
 
 # For fine tuning after optuna trials are complete, MODE="train"
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_pre_configs = json.load(f)
 
 log2pi = torch.log(torch.tensor(2 * torch.pi))
