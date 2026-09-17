@@ -1,8 +1,8 @@
 {
     "model_name": "model.pth",
-    "mano_root": "/home/miket/Documents/mano/models",
-    "model_dir": "/home/miket/Documents/Hand-Tracking-2/Model",
-    "stereo_data_dir": "/home/miket/Documents/StereoDataset",
+    "mano_root": "/mano/models",
+    "model_dir": "/Hand-Tracking-2/Model",
+    "stereo_data_dir": "/StereoDataset",
     "num_workers": 12,
     "weight_decay": 3.407583720747414e-05,
     "dropout": 0.0015467590275873334,
