@@ -14,15 +14,15 @@ from torch.utils.data import DataLoader
 from torch_geometric.data import Batch
 from utils import Stats, stereoTransform
 
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Dataset")
+sys.path.insert(0, "/Hand-Tracking-2/Keypoints")
+sys.path.insert(0, "/Hand-Tracking-2/Dataset")
 
 from handedgeindex import hand_edge_index  # type: ignore
 from keypointdetection import HAND_SKELETON, MediaPipe  # type: ignore
 
 sample_eval = True
 
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     configs = json.load(f)
 
 
@@ -164,7 +164,7 @@ def evalModel(sample: Path):
         right_kps, _, _ = pose.get_keypoints(right)
 
         fs = cv2.FileStorage(
-            "/home/miket/Documents/Hand-Tracking-2/Stereo/stereo.yml",
+            "/Hand-Tracking-2/Stereo/stereo.yml",
             cv2.FILE_STORAGE_READ,
         )
 
@@ -235,5 +235,5 @@ if not sample_eval:
     test_loss, test_dist, avg_time = evalModel(None)
     print(f"Test Anatomy Loss {test_loss: .6f} | Test Dist Loss {test_dist: .6f}")
 else:
-    _, _, avg_time = evalModel("/home/miket/Documents/StereoDataset/Clean/0165.jpg")
+    _, _, avg_time = evalModel("/StereoDataset/Clean/0165.jpg")
     print(f"Average Time: {avg_time: .4f}")
