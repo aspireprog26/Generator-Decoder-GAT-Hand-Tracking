@@ -8,9 +8,9 @@ from torch_geometric.data import Data
 def createGraphDataset(mode, type, decoder: bool = True):
     dataset = []
     dir = (
-        "/home/miket/Documents/StereoSTBDataset"
+        "/StereoSTBDataset"
         if type == "STB"
-        else "/home/miket/Documents/StereoDataset"
+        else "/StereoDataset"
     )
     dir = Path(dir)
 
