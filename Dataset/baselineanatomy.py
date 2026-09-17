@@ -118,10 +118,10 @@ def getAnatomyBaseline(data_dir: str):
 
 if __name__ == "__main__":
     print("Training:")
-    getAnatomyBaseline("/home/miket/Documents/StereoDataset/Training")
+    getAnatomyBaseline("/StereoDataset/Training")
 
     print("\nValidation:")
-    getAnatomyBaseline("/home/miket/Documents/StereoDataset/Validation")
+    getAnatomyBaseline("/StereoDataset/Validation")
 
     print("\nTesting")
-    getAnatomyBaseline("/home/miket/Documents/StereoDataset/Testing")
+    getAnatomyBaseline("/StereoDataset/Testing")
