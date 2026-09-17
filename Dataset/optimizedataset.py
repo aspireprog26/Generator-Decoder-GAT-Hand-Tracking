@@ -89,7 +89,7 @@ class DatasetOptimizer:
 
     def openCalibration(self):
         fs = cv2.FileStorage(
-            "/Stereo/stereo.yml",
+            "/Hand-Tracking-2/Stereo/stereo.yml",
             cv2.FILE_STORAGE_READ,
         )
 
