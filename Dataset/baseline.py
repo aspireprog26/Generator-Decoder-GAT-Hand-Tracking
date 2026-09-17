@@ -77,10 +77,10 @@ def getBaseline(data_dir: str):
 
 if __name__ == "__main__":
     print("Training:")
-    getBaseline("/home/miket/Documents/StereoDataset/Training")
+    getBaseline("/StereoDataset/Training")
 
     print("\nValidation:")
-    getBaseline("/home/miket/Documents/StereoDataset/Validation")
+    getBaseline("/StereoDataset/Validation")
 
     print("\nTesting")
-    getBaseline("/home/miket/Documents/StereoDataset/Testing")
+    getBaseline("/StereoDataset/Testing")
