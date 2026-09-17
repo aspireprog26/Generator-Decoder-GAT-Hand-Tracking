@@ -1,8 +1,8 @@
 import os  # noqa: I001
 import cv2
 
-video_path = "/home/miket/Documents/StereoDataset/Noisy/3.mp4"
-output_dir = "/home/miket/Documents/StereoDataset/Noisy"
+video_path = "/StereoDataset/Noisy/vid.mp4"
+output_dir = "/StereoDataset/Noisy"
 
 os.makedirs(output_dir, exist_ok=True)
 cap = cv2.VideoCapture(video_path)
