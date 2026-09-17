@@ -16,8 +16,8 @@ from pretrainer import Trainer as PreTrainer
 from torch_geometric.data import Batch
 from utils import Stats, procrustesAlign, stereoTransform
 
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Dataset")
+sys.path.insert(0, "/Hand-Tracking-2/Keypoints")
+sys.path.insert(0, "/Hand-Tracking-2/Dataset")
 
 from handedgeindex import hand_edge_index  # type: ignore
 from keypointdetection import HAND_SKELETON, MediaPipe  # type: ignore
@@ -25,13 +25,13 @@ from keypointdetection import HAND_SKELETON, MediaPipe  # type: ignore
 sample_eval = True
 
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".wmv"}
-STEREO_CALIB_PATH = "/home/miket/Documents/Hand-Tracking-2/Stereo/stereo.yml"
+STEREO_CALIB_PATH = "/Hand-Tracking-2/Stereo/stereo.yml"
 EMA_ALPHA = 0.6
 
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
 
-with open("/home/miket/Documents/Hand-Tracking-2/Model/manoconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/manoconfigs.json", "r") as f:
     mano_configs = json.load(f)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -347,5 +347,5 @@ def evalModel(sample, alpha: float = EMA_ALPHA):
         return evalVideo(sample, alpha=alpha)
 
 
-avg_time = evalModel("/home/miket/Documents/StereoDataset/Video/2.mp4")
+avg_time = evalModel("/StereoDataset/Video/2.mp4")
 print(f"Average Time per Frame: {avg_time: .4f}")
