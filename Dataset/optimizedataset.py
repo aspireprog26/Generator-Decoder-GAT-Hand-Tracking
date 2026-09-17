@@ -8,7 +8,7 @@ import torch
 from scipy.io import loadmat
 from tqdm import tqdm
 
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
+sys.path.insert(0, "/Hand-Tracking-2/Keypoints")
 
 import keypointdetection as kp  # type: ignore
 from constrain import OptimizeHands  # type: ignore
@@ -77,8 +77,8 @@ class DatasetOptimizer:
         if mp:
             self.pose = kp.MediaPipe()
 
-        self.data_dir = Path("/home/miket/Documents/StereoDataset")
-        self.stb_dir = Path("/home/miket/Documents/StereoSTBDataset/")
+        self.data_dir = Path("/StereoDataset")
+        self.stb_dir = Path("/StereoSTBDataset")
         self.label_dir = self.stb_dir / "labels"
 
         self.types = ["Clean", "Noisy"]
@@ -89,7 +89,7 @@ class DatasetOptimizer:
 
     def openCalibration(self):
         fs = cv2.FileStorage(
-            "/home/miket/Documents/Stereo/stereo.yml",
+            "/Stereo/stereo.yml",
             cv2.FILE_STORAGE_READ,
         )
 
