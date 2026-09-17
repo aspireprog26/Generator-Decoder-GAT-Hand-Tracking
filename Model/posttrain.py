@@ -85,11 +85,11 @@ class Loss:
 
 
 """
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
 """
 
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
