@@ -41,7 +41,7 @@ ANGLE_JOINTS = [
 
 PALM = [0, 1, 5, 9, 13, 17]
 
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/decpreconfigs.json", "r") as f:
     configs = json.load(f)
 
 
