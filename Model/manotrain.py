@@ -12,14 +12,14 @@ from utils import ANGLE_JOINTS, HAND_SKELETON, saveConfigs
 
 MODE = "optuna"
 
-with open("/home/miket/Documents/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/decpostconfigs.json", "r") as f:
     dec_post_configs = json.load(f)
 
 configs = {
     "model_name": "model.pth",
-    "mano_root": "/home/miket/Documents/mano/models",
-    "model_dir": "/home/miket/Documents/Hand-Tracking-2/Model",
-    "stereo_data_dir": "/home/miket/Documents/StereoDataset",
+    "mano_root": "/mano/models",
+    "model_dir": "/Hand-Tracking-2/Model",
+    "stereo_data_dir": "/StereoDataset",
     "num_workers": 12,
     "weight_decay": 1e-2,
     "dropout": 0.1,
@@ -47,7 +47,7 @@ configs.update(
 
 # For post Optuna fine tuning
 """
-with open("/home/miket/Documents/Hand-Tracking-2/Model/manoconfigs.json", "r") as f:
+with open("/Hand-Tracking-2/Model/manoconfigs.json", "r") as f:
     configs = json.load(f)
 """
 
