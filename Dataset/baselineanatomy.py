@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-sys.path.insert(0, "/home/miket/Documents/Hand-Tracking-2/Keypoints")
+sys.path.insert(0, "/Hand-Tracking-2/Keypoints")
 from keypointdetection import ANGLE_JOINTS, HAND_SKELETON  # type: ignore
 
 SANE_COORD_BOUND = 500.0
